@@ -1,0 +1,28 @@
+numpy
+pandas
+matplotlib
+tqdm
+pyspark >= 3.4.0
+pyarrow
+scikit-learn
+torch
+torchvision
+torchaudio
+librosa
+sox
+ffmpeg-python
+lightning
+torchmetrics
+pacmap
+wandb
+
+luigi
+google-api-python-client
+google-auth
+google-cloud-storage
+
+# developer tools
+jupyterlab
+ruff
+pre-commit
+pytest

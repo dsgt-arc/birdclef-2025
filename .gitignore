@@ -1,0 +1,11 @@
+/.idea/
+/data/
+__pycache__
+*.pyc
+*.egg-info
+venv/
+.venv/
+lightning_logs
+*perf_logs.txt
+/logs*
+node_modules/
