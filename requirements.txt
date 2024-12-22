@@ -13,7 +13,8 @@ sox
 ffmpeg-python
 lightning
 torchmetrics
-pacmap
+# can't install because we can't compile annoy due to missing Python.h
+# pacmap
 wandb
 
 luigi

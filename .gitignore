@@ -9,3 +9,4 @@ lightning_logs
 *perf_logs.txt
 /logs*
 node_modules/
+build/
