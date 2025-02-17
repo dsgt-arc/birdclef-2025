@@ -25,3 +25,6 @@ dependencies = { file = "requirements.txt" }
 where = ["."]
 include = ["birdclef*"]
 namespaces = false
+
+[tool.uv]
+cache-dir = "~/scratch/uv-cache"
