@@ -13,9 +13,11 @@ sox
 ffmpeg-python
 lightning
 torchmetrics
-# can't install because we can't compile annoy due to missing Python.h
-# pacmap
+# ensure that you're loading the environment correctly on PACE via activate script
+pacmap
 wandb
+tensorflow
+birdnetlib
 
 luigi
 google-api-python-client
