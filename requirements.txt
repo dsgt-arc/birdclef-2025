@@ -10,6 +10,7 @@ torchvision
 torchaudio
 librosa
 sox
+soundfile
 ffmpeg-python
 lightning
 torchmetrics
