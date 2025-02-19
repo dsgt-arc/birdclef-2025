@@ -3,14 +3,16 @@ from pathlib import Path
 
 import luigi
 import tqdm
-
-
 from birdclef.luigi import maybe_gcs_target
 from birdclef.spark import spark_resource
 
 
 class BaseEmbedSoundscapesAudio(luigi.Task):
-    """Embed soundscapes embeddings"""
+    """Embed soundscapes embeddings
+
+    This generally works on a single batch of files at a time, and is meant to
+    be processed by multiple workers in parallel.
+    """
 
     audio_path = luigi.Parameter()
     metadata_path = luigi.Parameter()
@@ -49,9 +51,6 @@ class BaseEmbedSoundscapesAudio(luigi.Task):
 
 
 class BaseEmbedSoundscapesAudioWorkflow(luigi.Task):
-    remote_root = luigi.Parameter()
-    local_root = luigi.Parameter()
-
     audio_path = luigi.Parameter()
     metadata_path = luigi.Parameter()
     intermediate_path = luigi.Parameter()

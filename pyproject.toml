@@ -13,6 +13,7 @@ Issues = "https://github.com/dsgt-kaggle-clef/birdclef-2025/issues"
 
 [project.scripts]
 birdclef-eda-duration = "birdclef.eda.duration:main"
+birdclef = "birdclef.cli:app"
 
 [build-system]
 requires = ["setuptools>=61.0"]
