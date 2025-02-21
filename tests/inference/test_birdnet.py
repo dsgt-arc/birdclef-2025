@@ -1,11 +1,6 @@
 from birdclef.inference.birdnet import BirdNetInference
 
 
-def test_birdnet_inference_init(metadata_path):
-    bi = BirdNetInference(metadata_path)
-    assert bi is not None
-
-
 def test_birdnet_inference_predict(metadata_path):
     bi = BirdNetInference(metadata_path)
     embedding, _ = bi.predict(metadata_path.parent / "file_0.ogg")
