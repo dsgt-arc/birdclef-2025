@@ -1,5 +1,5 @@
-from typer import Typer
+import typer
 from .etl import app as etl_app
 
-app = Typer()
+app = typer.Typer(no_args_is_help=True)
 app.add_typer(etl_app, name="etl")

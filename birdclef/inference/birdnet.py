@@ -1,17 +1,3 @@
-import tensorflow as tf
-
-# We don't want to run BirdNET on a GPU
-# https://datascience.stackexchange.com/a/76039
-try:
-    # Disable all GPUS
-    tf.config.set_visible_devices([], "GPU")
-    visible_devices = tf.config.get_visible_devices()
-    for device in visible_devices:
-        assert device.device_type != "GPU"
-except Exception:
-    # Invalid device or cannot modify virtual devices once initialized.
-    pass
-
 import numpy as np
 import pandas as pd
 import torch
@@ -31,12 +17,29 @@ class BirdNetInference(Inference):
         metadata_path: str,
         max_length: int = 0,
     ):
+        self._import_tensorflow()
         self.metadata = pd.read_csv(metadata_path)
         self.max_length = max_length
         self.resampler = Resample(32_000, 48_000)
         self.source_sr = 32_000
         self.target_sr = 48_000
         self.analyzer = Analyzer(verbose=False)
+
+    def _import_tensorflow(self):
+        """Import tensorflow and return the version."""
+        import tensorflow as tf
+
+        # We don't want to run BirdNET on a GPU
+        # https://datascience.stackexchange.com/a/76039
+        try:
+            # Disable all GPUS
+            tf.config.set_visible_devices([], "GPU")
+            visible_devices = tf.config.get_visible_devices()
+            for device in visible_devices:
+                assert device.device_type != "GPU"
+        except Exception:
+            # Invalid device or cannot modify virtual devices once initialized.
+            pass
 
     def load(self, path: str, window_sec: int = 5) -> np.ndarray:
         """Load an audio file.
