@@ -10,12 +10,21 @@ torchvision
 torchaudio
 librosa
 sox
+soundfile
 ffmpeg-python
 lightning
 torchmetrics
-# can't install because we can't compile annoy due to missing Python.h
-# pacmap
+numba
+# ensure that you're loading the environment correctly on PACE via activate script
+pacmap
 wandb
+tensorflow
+# birdnetlib
+birdnetlib@git+https://github.com/dsgt-kaggle-clef/birdnetlib.git#2fa71ee549dd9dacc6a18d382c054632c5531998
+# we get weird tensorflow allocation errors otherwise
+# https://github.com/joeweiss/birdnetlib/issues/125
+tensorflow==2.16.1
+typer
 
 luigi
 google-api-python-client

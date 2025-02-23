@@ -11,10 +11,10 @@ os.environ["PYSPARK_DRIVER_PYTHON"] = sys.executable
 
 
 def get_spark(
-    cores=os.cpu_count(),
-    memory=os.environ.get("PYSPARK_DRIVER_MEMORY", "16g"),
+    cores=os.environ.get("PYSPARK_EXECUTOR_CORES", os.cpu_count()),
+    memory=os.environ.get("PYSPARK_DRIVER_MEMORY", "8g"),
     executor_memory=os.environ.get("PYSPARK_EXECUTOR_MEMORY", "1g"),
-    local_dir="/mnt/data/tmp",
+    local_dir=os.environ.get("SPARK_LOCAL_DIR", os.environ.get("TMPDIR", "/tmp")),
     app_name="birdclef",
     **kwargs,
 ):
@@ -24,7 +24,7 @@ def get_spark(
     builder = (
         SparkSession.builder.config("spark.driver.memory", memory)
         .config("spark.executor.memory", executor_memory)
-        .config("spark.driver.cores", cores)
+        .config("spark.executor.cores", cores)
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
         .config("spark.driver.maxResultSize", "8g")
         .config("spark.local.dir", local_dir)
