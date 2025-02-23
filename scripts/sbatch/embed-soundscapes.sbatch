@@ -1,7 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=soundscape --account=paceship-dsgt_clef2025
-#SBATCH -N4 -n4 --cpus-per-task=2 --mem-per-cpu=4G
-#SBATCH -t60 -qembers -oReport-%j.out
+##SBATCH -N4 -n4 --cpus-per-task=2 --mem-per-cpu=4G
+#SBATCH -N32 -n32 --cpus-per-task=2 --mem-per-cpu=4G
+#SBATCH -t120 -qembers -oReport-%j.out
 set -ue
 
 source ~/scratch/birdclef/.venv/bin/activate
@@ -25,7 +26,7 @@ srun bash -c "
     set -x && \
     birdclef etl embed birdnet soundscapes \
         --total-batches ${TOTAL_BATCHES:-200} \
-        --limit ${LIMIT:-} \
+        $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi) \
         --scheduler-host $(hostname) \
         $audio_path \
         $intermediate_path

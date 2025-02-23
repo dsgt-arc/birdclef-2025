@@ -18,8 +18,9 @@ module load python/3.10
 export CPATH=$PYTHON_ROOT/include/python3.10:$CPATH
 
 # create a virtual environment with uv
-python -m ensurepip
-python -m pip install --upgrade pip uv
+# check pip and uv are installed
+if ! command -v pip &> /dev/null; then python -m ensurepip; fi
+if ! command -v uv &> /dev/null; then python -m pip install --upgrade pip uv; fi
 mkdir -p $VENV_PARENT_ROOT
 pushd $VENV_PARENT_ROOT
 
