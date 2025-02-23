@@ -39,17 +39,19 @@ class Inference:
     def predict_species_df(
         self,
         root: str,
+        metadata: pd.DataFrame,
         species: str,
         out_path: str,
     ) -> pd.DataFrame:
         """Helper function to embed all the training data for a species in the training dataset.
 
         :param root: The root directory of the audio files.
+        :param metadata: The metadata for the audio files.
         :param species: The species to embed.
         :param out_path: The path to save the embeddings.
         """
         tqdm.pandas()
-        subset = self.metadata[self.metadata["primary_label"] == species]
+        subset = metadata[metadata["primary_label"] == species]
         dfs = subset.filename.progress_apply(partial(self.predict_df, root)).tolist()
         df = pd.concat(dfs)
         df.to_parquet(out_path, index=False)

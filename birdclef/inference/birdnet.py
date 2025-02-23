@@ -1,11 +1,9 @@
 import numpy as np
-import pandas as pd
 import torch
 import torchaudio
 from birdnetlib import RecordingBuffer
 from birdnetlib.analyzer import Analyzer
 from torchaudio.transforms import Resample
-
 from birdclef.inference.base import Inference
 
 
@@ -14,11 +12,9 @@ class BirdNetInference(Inference):
 
     def __init__(
         self,
-        metadata_path: str,
         max_length: int = 0,
     ):
         self._import_tensorflow()
-        self.metadata = pd.read_csv(metadata_path)
         self.max_length = max_length
         self.resampler = Resample(32_000, 48_000)
         self.source_sr = 32_000
@@ -46,7 +42,7 @@ class BirdNetInference(Inference):
 
         :param path: The absolute path to the audio file.
         """
-        audio, _ = torchaudio.load(path)
+        audio, _ = torchaudio.load(str(path))
         audio = audio[0]
         # right pad the audio so we can reshape into a rectangle
         n = audio.shape[0]

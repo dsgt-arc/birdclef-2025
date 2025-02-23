@@ -1,5 +1,5 @@
 import typer
-from .birdnet.workflow import main as birdnet_main
+from .birdnet.workflow import app as birdnet_app
 
 app = typer.Typer(no_args_is_help=True)
-app.command("birdnet")(birdnet_main)
+app.add_typer(birdnet_app, name="birdnet")

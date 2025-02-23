@@ -15,7 +15,6 @@ class BaseEmbedSoundscapesAudio(luigi.Task):
     """
 
     audio_path = luigi.Parameter()
-    metadata_path = luigi.Parameter()
     output_path = luigi.Parameter()
 
     total_batches = luigi.IntParameter(default=100)
@@ -40,6 +39,7 @@ class BaseEmbedSoundscapesAudio(luigi.Task):
             if maybe_gcs_target(out_path).exists():
                 continue
             df = inference.predict_df(path.parent, path.name)
+            Path(out_path).parent.mkdir(parents=True, exist_ok=True)
             df.to_parquet(out_path, index=False)
 
         # write success
@@ -52,7 +52,6 @@ class BaseEmbedSoundscapesAudio(luigi.Task):
 
 class BaseEmbedSoundscapesAudioWorkflow(luigi.Task):
     audio_path = luigi.Parameter()
-    metadata_path = luigi.Parameter()
     intermediate_path = luigi.Parameter()
     output_path = luigi.Parameter()
 

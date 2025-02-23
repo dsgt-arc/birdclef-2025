@@ -34,20 +34,22 @@ def species():
 def metadata_path(tmp_path, species):
     """Subset of the metadata for testing."""
     metadata = tmp_path / "metadata.csv"
+    audio = tmp_path / "audio"
+    audio.mkdir()
     rows = []
-    for i in range(3):
-        filename = f"file_{i}.ogg"
+    for i in range(5):
+        filename = audio / f"file_{i}.ogg"
         primary_label = species[i]
         rows.append(
             {
                 "primary_label": primary_label,
-                "filename": filename,
+                "filename": filename.relative_to(tmp_path).as_posix(),
             }
         )
         sr = 32_000
         # create 2 channel audio from random noise
         y = np.random.rand(10 * sr)
-        sf.write(tmp_path / filename, y, sr)
+        sf.write(filename.as_posix(), y, sr)
     df = pd.DataFrame(rows)
     df.to_csv(metadata, index=False)
     return metadata
@@ -76,7 +78,7 @@ def soundscape_path(tmp_path):
     """Subset of the metadata for testing."""
     soundscape = tmp_path / "soundscape"
     soundscape.mkdir()
-    for i in range(3):
+    for i in range(5):
         filename = f"file_{i}.ogg"
         sr = 32_000
         # create 2 channel audio from random noise

@@ -8,29 +8,32 @@ from birdclef.etl.embed.base.soundscapes import (
 )
 from birdclef.inference.birdnet import BirdNetInference
 
+app = typer.Typer(no_args_is_help=True)
+
 
 class BirdNetEmbedSoundscapesAudio(BaseEmbedSoundscapesAudio):
     def get_inference(self):
-        return BirdNetInference(metadata_path=self.metadata_path)
+        return BirdNetInference()
 
 
 class BirdNetEmbedSoundscapesAudioWorkflow(BaseEmbedSoundscapesAudioWorkflow):
     def get_task(self, batch_number):
         return BirdNetEmbedSoundscapesAudio(
             audio_path=self.audio_path,
-            metadata_path=self.metadata_path,
             output_path=self.intermediate_path,
             batch_number=batch_number,
         )
 
 
-def main(
+@app.command("soundscapes")
+def embed_soundscapes(
     audio_path: Annotated[str, typer.Argument(help="Path to audio files")],
-    metadata_path: Annotated[str, typer.Argument(help="Path to metadata")],
     intermediate_path: Annotated[str, typer.Argument(help="Path to intermediate data")],
     output_path: Annotated[str, typer.Argument(help="Path to output data")],
     total_batches: Annotated[int, typer.Option(help="Total number of batches")] = 100,
-    num_partitions: Annotated[int, typer.Option(help="Number of partitions")] = 16,
+    num_partitions: Annotated[
+        int, typer.Option(help="Number of final parquet partitions")
+    ] = 16,
     scheduler_host: Annotated[str, typer.Option(help="Scheduler host")] = None,
 ):
     """Embed soundscapes using BirdNet."""
@@ -44,7 +47,6 @@ def main(
         [
             BirdNetEmbedSoundscapesAudioWorkflow(
                 audio_path=audio_path,
-                metadata_path=metadata_path,
                 intermediate_path=intermediate_path,
                 output_path=output_path,
                 total_batches=total_batches,
