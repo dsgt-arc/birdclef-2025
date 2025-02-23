@@ -4,7 +4,6 @@ from pathlib import Path
 import luigi
 import tqdm
 from birdclef.luigi import maybe_gcs_target
-from birdclef.spark import spark_resource
 
 
 class BaseEmbedSoundscapesAudio(luigi.Task):
@@ -17,8 +16,12 @@ class BaseEmbedSoundscapesAudio(luigi.Task):
     audio_path = luigi.Parameter()
     output_path = luigi.Parameter()
 
-    total_batches = luigi.IntParameter(default=100)
+    total_batches = luigi.IntParameter()
     batch_number = luigi.IntParameter()
+
+    @property
+    def resources(self):
+        return {self.output().path: 1}
 
     def output(self):
         return maybe_gcs_target(f"{self.output_path}/{self.batch_number:03d}/_SUCCESS")
@@ -50,26 +53,20 @@ class BaseEmbedSoundscapesAudio(luigi.Task):
         raise NotImplementedError()
 
 
-class BaseEmbedSoundscapesAudioWorkflow(luigi.Task):
+class BaseEmbedSoundscapesAudioWorkflow(luigi.WrapperTask):
     audio_path = luigi.Parameter()
     intermediate_path = luigi.Parameter()
     output_path = luigi.Parameter()
 
-    total_batches = luigi.IntParameter(default=100)
-    num_partitions = luigi.IntParameter(default=16)
+    total_batches = luigi.IntParameter(default=200)
+    limit = luigi.OptionalIntParameter(default=None)
 
     def get_task(self, batch_number: int) -> BaseEmbedSoundscapesAudio:
         raise NotImplementedError()
 
-    def output(self):
-        return maybe_gcs_target(f"{self.output_path}/_SUCCESS")
+    def requires(self):
+        batch_numbers = list(range(self.total_batches))
+        if self.limit is not None and self.limit > 0:
+            batch_numbers = batch_numbers[: self.limit]
 
-    def run(self):
-        yield [self.get_task(i) for i in range(self.total_batches)]
-
-        with spark_resource() as spark:
-            (
-                spark.read.parquet(f"{self.intermediate_path}/*/*.parquet")
-                .repartition(self.num_partitions)
-                .write.parquet(f"{self.output_path}", mode="overwrite")
-            )
+        yield [self.get_task(batch_number) for batch_number in batch_numbers]

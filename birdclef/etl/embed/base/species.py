@@ -14,6 +14,10 @@ class BaseEmbedSpeciesAudio(luigi.Task):
     output_path = luigi.Parameter()
     species = luigi.Parameter()
 
+    @property
+    def resources(self):
+        return {self.output().path: 1}
+
     def output(self):
         return maybe_gcs_target(f"{self.output_path}/{self.species}.parquet")
 
