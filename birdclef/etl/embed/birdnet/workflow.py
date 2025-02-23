@@ -6,7 +6,6 @@ from birdclef.etl.embed.base.soundscapes import (
     BaseEmbedSoundscapesAudio,
     BaseEmbedSoundscapesAudioWorkflow,
 )
-from birdclef.luigi import RepartitionParquet
 from birdclef.inference.birdnet import BirdNetInference
 
 app = typer.Typer(no_args_is_help=True)
@@ -21,20 +20,17 @@ class BirdNetEmbedSoundscapesAudioWorkflow(BaseEmbedSoundscapesAudioWorkflow):
     def get_task(self, batch_number):
         return BirdNetEmbedSoundscapesAudio(
             audio_path=self.audio_path,
-            output_path=self.intermediate_path,
+            output_path=self.output_path,
             batch_number=batch_number,
+            total_batches=self.total_batches,
         )
 
 
 @app.command("soundscapes")
 def embed_soundscapes(
     audio_path: Annotated[str, typer.Argument(help="Path to audio files")],
-    intermediate_path: Annotated[str, typer.Argument(help="Path to intermediate data")],
     output_path: Annotated[str, typer.Argument(help="Path to output data")],
     total_batches: Annotated[int, typer.Option(help="Total number of batches")] = 200,
-    num_partitions: Annotated[
-        int, typer.Option(help="Number of final parquet partitions")
-    ] = 16,
     limit: Annotated[int | None, typer.Option(help="Limit the number of files")] = None,
     scheduler_host: Annotated[str, typer.Option(help="Scheduler host")] = None,
 ):
@@ -49,21 +45,9 @@ def embed_soundscapes(
         [
             BirdNetEmbedSoundscapesAudioWorkflow(
                 audio_path=audio_path,
-                intermediate_path=intermediate_path,
                 output_path=output_path,
                 total_batches=total_batches,
                 limit=limit,
-            )
-        ],
-        **kwargs,
-    )
-
-    luigi.build(
-        [
-            RepartitionParquet(
-                input_path=f"{intermediate_path}/*/*.parquet",
-                output_path=output_path,
-                num_partitions=num_partitions,
             )
         ],
         **kwargs,

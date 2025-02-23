@@ -55,7 +55,6 @@ class BaseEmbedSoundscapesAudio(luigi.Task):
 
 class BaseEmbedSoundscapesAudioWorkflow(luigi.WrapperTask):
     audio_path = luigi.Parameter()
-    intermediate_path = luigi.Parameter()
     output_path = luigi.Parameter()
 
     total_batches = luigi.IntParameter(default=200)

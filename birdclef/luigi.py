@@ -1,7 +1,6 @@
 import tempfile
 from textwrap import dedent
 
-from birdclef.spark import spark_resource
 import luigi.contrib.gcs
 from luigi.contrib.external_program import ExternalProgramTask
 
@@ -62,26 +61,3 @@ class RsyncGCSFiles(BashScriptTask):
         super().run()
         with self.output().open("w") as f:
             f.write("")
-
-
-class RepartitionParquet(luigi.Task):
-    """Repartition the parquet files into a single file."""
-
-    input_path = luigi.Parameter()
-    output_path = luigi.Parameter()
-    num_partitions = luigi.IntParameter(default=16)
-
-    @property
-    def resources(self):
-        return {self.output().path: 1}
-
-    def output(self):
-        return maybe_gcs_target(f"{self.output_path}/_SUCCESS")
-
-    def run(self):
-        with spark_resource() as spark:
-            (
-                spark.read.parquet()
-                .repartition(self.num_partitions)
-                .write.parquet(self.output_path, mode="overwrite")
-            )

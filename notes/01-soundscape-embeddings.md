@@ -18,7 +18,24 @@ NUM_PARTITIONS=1 \
 sbatch scripts/sbatch/embed-soundscapes.sbatch \
     ~/shared/birdclef/raw/birdclef-2024/unlabeled_soundscapes \
     ~/scratch/tmp/birdclef/intermediate/birdclef-2024/unlabeled_soundscapes/embed/birdnet \
-    ~/shared/birdclef/processed/birdclef-2024/unlabeled_soundscapes/embed/birdnet
+    ~/scratch/birdclef/processed/birdclef-2024/unlabeled_soundscapes/embed/birdnet
+```
+
+The individual file schema takes on the following form when loaded into duckdb:
+
+```
+D select * from parquet_Schema('1036727835.parquet');
+┌────────────────────┬───────────┬────────────┬─────────────┬─────────────────┬──────────────┬────────────────┬───────┬───────────┬──────────┬──────────────┐
+│     file_name      │   name    │    type    │ type_length │ repetition_type │ num_children │ converted_type │ scale │ precision │ field_id │ logical_type │
+│      varchar       │  varchar  │  varchar   │   varchar   │     varchar     │    int64     │    varchar     │ int64 │   int64   │  int64   │   varchar    │
+├────────────────────┼───────────┼────────────┼─────────────┼─────────────────┼──────────────┼────────────────┼───────┼───────────┼──────────┼──────────────┤
+│ 1036727835.parquet │ schema    │            │             │ REQUIRED        │            3 │                │       │           │          │              │
+│ 1036727835.parquet │ name      │ BYTE_ARRAY │             │ OPTIONAL        │              │ UTF8           │       │           │          │ StringType() │
+│ 1036727835.parquet │ chunk_5s  │ INT64      │             │ OPTIONAL        │              │                │       │           │          │              │
+│ 1036727835.parquet │ embedding │            │             │ OPTIONAL        │            1 │ LIST           │       │           │          │ ListType()   │
+│ 1036727835.parquet │ list      │            │             │ REPEATED        │            1 │                │       │           │          │              │
+│ 1036727835.parquet │ element   │ DOUBLE     │             │ OPTIONAL        │              │                │       │           │          │              │
+└────────────────────┴───────────┴────────────┴─────────────┴─────────────────┴──────────────┴────────────────┴───────┴───────────┴──────────┴──────────────┘
 ```
 
 From the logs, it looks like each soundscape takes ~7 seconds where each task gets 2 cpus.
