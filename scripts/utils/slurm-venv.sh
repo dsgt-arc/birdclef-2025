@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# usage: source scripts/slurm-venv.sh [venv_root]
 SCRIPT_PARENT_ROOT=$(
     dirname ${BASH_SOURCE[0]} \
     | dirname $(cat -) \
     | realpath $(cat -)
 )
 
-# choose the module depending if this being run on slurm or not
-MODULE_PATH=$(dirname $SCRIPT_PARENT_ROOT)
-# MODULE_PATH=${SLURM_SUBMIT_DIR:-$MODULE_PATH}
-# optional argument to specify the venv root
 VENV_PARENT_ROOT=${1:-~/scratch/birdclef}
 VENV_PARENT_ROOT=$(realpath $VENV_PARENT_ROOT)
 
 # use an updated version of python and set the include path for wheels
 module load python/3.10
+PYTHON_ROOT=$(python -c 'import sys; print(sys.base_prefix)')
 export CPATH=$PYTHON_ROOT/include/python3.10:$CPATH
 
 # create a virtual environment with uv
@@ -35,6 +31,6 @@ fi
 
 # check for NO_REINSTALL flag
 if [[ -z ${NO_REINSTALL:-} ]]; then
-    uv pip install -e $MODULE_PATH
+    uv pip install -e "$(dirname $SCRIPT_PARENT_ROOT)[dev]"
 fi
 popd
