@@ -31,6 +31,6 @@ fi
 
 # check for NO_REINSTALL flag
 if [[ -z ${NO_REINSTALL:-} ]]; then
-    uv pip install -e $(dirname $SCRIPT_PARENT_ROOT)
+    uv pip install -e "$(dirname $SCRIPT_PARENT_ROOT)[dev]"
 fi
 popd
