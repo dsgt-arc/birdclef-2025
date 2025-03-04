@@ -9,7 +9,7 @@ SCRIPT_PARENT_ROOT=$(
 MODULE_PATH=$(dirname $SCRIPT_PARENT_ROOT)
 cd $MODULE_PATH
 
-out=$(sbatch scripts/sbatch/slurm-test.sbatch)
+out=$(sbatch sbatch/slurm-test.sbatch)
 echo $out
 # parse out the job "Submitted batch job 2618424"
 jobid=$(echo $out | awk '{print $4}')
