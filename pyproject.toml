@@ -42,6 +42,7 @@ dev = [
     "ruff",
     "pre-commit",
     "pytest",
+    "pace-job-monitoring@git+https://github.com/dsgt-kaggle-clef/pace-job-monitoring.git#main",
 ]
 
 [project.urls]
