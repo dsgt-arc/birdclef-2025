@@ -13,6 +13,7 @@ class BirdNetSoundscapeDataset(IterableDataset):
     def __init__(
         self,
         soundscape_path: str,
+        metadata_path: str,
         max_length: int = 4 * 60 / 5,
         limit=None,
     ):
@@ -27,9 +28,10 @@ class BirdNetSoundscapeDataset(IterableDataset):
         self.max_length = int(max_length)
         if limit is not None:
             self.soundscapes = self.soundscapes[:limit]
+        self.metadata_path = metadata_path
 
     def _load_data(self, iter_start, iter_end):
-        model = BirdNetInference()
+        model = BirdNetInference(self.metadata_path)
         for i in range(iter_start, iter_end):
             path = self.soundscapes[i]
             embeddings, _ = model.predict(path)
@@ -40,7 +42,7 @@ class BirdNetSoundscapeDataset(IterableDataset):
             # now we yield a dictionary
             for idx, embedding in zip(indices, embeddings):
                 yield {
-                    "row_id": f"{path.stem}_{(idx + 1) * 5}",
+                    "row_id": f"{path.stem}_{(idx+1)*5}",
                     "embedding": embedding,
                 }
 
@@ -64,6 +66,7 @@ class BirdNetSoundscapeDataModule(pl.LightningDataModule):
     def __init__(
         self,
         soundscape_path: str,
+        metadata_path: str,
         batch_size: int = 32,
         num_workers: int = 0,
         limit=None,
@@ -71,13 +74,18 @@ class BirdNetSoundscapeDataModule(pl.LightningDataModule):
         """Initialize the data module.
 
         :param soundscape_path: The path to the soundscape data.
+        :param metadata_path: The path to the metadata.
         :param model_path: The path to the model.
         :param batch_size: The batch size.
         :param limit: The number of files to limit the dataset to.
         """
         super().__init__()
         self.dataloader = DataLoader(
-            BirdNetSoundscapeDataset(soundscape_path, limit=limit),
+            BirdNetSoundscapeDataset(
+                soundscape_path,
+                metadata_path,
+                limit=limit,
+            ),
             batch_size=batch_size,
             num_workers=num_workers,
         )
