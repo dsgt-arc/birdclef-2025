@@ -3,6 +3,8 @@ from pathlib import Path
 
 import lightning as pl
 import torch
+import pandas as pd
+from sklearn.model_selection import train_test_split
 from birdclef.inference import BaseInference, BirdNetInference
 from torch.utils.data import DataLoader, IterableDataset
 
@@ -110,29 +112,82 @@ class BirdNetSpeciesDataModule(pl.LightningDataModule):
         self,
         audio_path: str,
         metadata_path: str,
-        species: str,
         batch_size: int = 32,
         num_workers: int = 0,
         limit=None,
+        val_size: float = 0.15,
+        test_size: float = 0.15,
     ):
         """Initialize the data module."""
-        # TODO: split the metadata dataframe into train, validation, and test stratified by species
-
         super().__init__()
-        self.dataloader = DataLoader(
-            BirdNetSpeciesDataset(audio_path, metadata_path, species, limit=limit),
-            batch_size=batch_size,
-            num_workers=num_workers,
+        self.audio_path = audio_path
+        self.metadata_path = metadata_path
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.limit = limit
+        self.val_size = val_size
+        self.test_size = test_size
+
+    def setup(self, stage=None):
+        """Split the metadata into train, validation, and test sets."""
+        # Load the metadata
+        metadata = pd.read_csv(self.metadata_path)
+        if self.limit is not None:
+            metadata = metadata.head(self.limit)
+
+        # Stratified split based on species
+        # First split off the test set
+        train_val_data, test_data = train_test_split(
+            metadata,
+            test_size=self.test_size,
+            stratify=metadata["primary_label"],
+            random_state=42,
         )
 
+        # Then split the remaining data into train and validation
+        adjusted_val_size = self.val_size / (1 - self.test_size)
+        train_data, val_data = train_test_split(
+            train_val_data,
+            test_size=adjusted_val_size,
+            stratify=train_val_data["primary_label"],
+            random_state=42,
+        )
+
+        self.train_metadata = train_data
+        self.val_metadata = val_data
+        self.test_metadata = test_data
+
+        self.dataloader_kwargs = {
+            "batch_size": self.batch_size,
+            "num_workers": self.num_workers,
+        }
+        self.dataset_shared_kwargs = {
+            "audio_path": self.audio_path,
+            "metadata_path": self.metadata_path,
+        }
+
     def train_dataloader(self):
-        return self.dataloader
+        return DataLoader(
+            BirdNetSpeciesDataset(
+                self.train_metadata, limit=self.limit, **self.dataset_shared_kwargs
+            ),
+            **self.dataloader_kwargs,
+        )
 
     def val_dataloader(self):
-        return self.dataloader
+        return DataLoader(
+            BirdNetSpeciesDataset(self.val_metadata, **self.dataset_shared_kwargs),
+            **self.dataloader_kwargs,
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            BirdNetSpeciesDataset(self.test_metadata, **self.dataset_shared_kwargs),
+            **self.dataloader_kwargs,
+        )
 
     def predict_dataloader(self):
-        return self.dataloader
+        return self.test_dataloader()
 
 
 class BirdNetSoundscapeDataModule(pl.LightningDataModule):
