@@ -17,7 +17,7 @@ from .model import LinearClassifier
 def train_model(
     audio_path: str = typer.Argument(..., help="Path to audio files directory"),
     metadata_path: str = typer.Argument(..., help="Path to metadata CSV file"),
-    output_dir: str = typer.Option("models", help="Directory to save model outputs"),
+    output_dir: str = typer.Argument(..., help="Directory to save model outputs"),
     batch_size: int = typer.Option(32, help="Batch size for training"),
     num_workers: int = typer.Option(4, help="Number of data loading workers"),
     max_epochs: int = typer.Option(30, help="Maximum number of training epochs"),

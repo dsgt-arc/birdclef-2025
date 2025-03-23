@@ -169,21 +169,29 @@ class BirdNetSpeciesDataModule(pl.LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             BirdNetSpeciesDataset(
-                self.train_metadata, limit=self.limit, **self.dataset_shared_kwargs
+                self.audio_path,
+                self.train_metadata,
+                self.species,
+                limit=self.limit,
             ),
-            **self.dataloader_kwargs,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
         )
 
     def val_dataloader(self):
         return DataLoader(
-            BirdNetSpeciesDataset(self.val_metadata, **self.dataset_shared_kwargs),
-            **self.dataloader_kwargs,
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
         )
 
     def test_dataloader(self):
         return DataLoader(
-            BirdNetSpeciesDataset(self.test_metadata, **self.dataset_shared_kwargs),
-            **self.dataloader_kwargs,
+            BirdNetSpeciesDataset(
+                self.audio_path, self.metadata_path, self.species, limit=None
+            ),
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
         )
 
     def predict_dataloader(self):

@@ -3,12 +3,14 @@ from pathlib import Path
 import lightning as pl
 import pandas as pd
 import torch
-from birdclef.config import SPECIES
-from birdclef.experiment.model import LinearClassifier
+from birdclef.config import get_species
+from .model import LinearClassifier
 from lightning.pytorch.profilers import AdvancedProfiler
 from tqdm import tqdm
 
 from .data import BirdNetSoundscapeDataModule
+
+SPECIES = get_species()
 
 
 class PassthroughModel(pl.LightningModule):
