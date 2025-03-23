@@ -7,6 +7,7 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from birdclef.inference import BaseInference, BirdNetInference
 from torch.utils.data import DataLoader, IterableDataset
+from birdclef.config import get_species_label_encoder
 
 
 class AudioInferenceIterableDataset(IterableDataset):
@@ -60,16 +61,20 @@ class BirdNetSpeciesDataset(AudioInferenceIterableDataset):
         # over all rows in the dataset, we provide embeddings of the tracks
         # TODO: we also need to split tracks that are too long by reading them
         # in at most 10 minute chunks
+        le = get_species_label_encoder()
         for i in range(iter_start, iter_end):
             row = self.metadata.iloc[i]
             path = Path(self.audio_path) / row["filename"]
             embeddings, _ = model.predict(path)
             embeddings = embeddings[: self.max_length].float()
             for idx, embedding in enumerate(embeddings):
+                label = torch.zeros(len(le.classes_))
+                label[le.transform([row["primary_label"]])] = 1
                 yield {
                     "row_id": f"{row['filename']}_{(idx + 1) * 5}",
-                    "embedding": embedding,
                     "species": row["primary_label"],
+                    "features": embedding,
+                    "label": label,
                 }
 
 
@@ -101,7 +106,7 @@ class BirdNetSoundscapeDataset(AudioInferenceIterableDataset):
             for idx, embedding in enumerate(embeddings):
                 yield {
                     "row_id": f"{path.stem}_{(idx + 1) * 5}",
-                    "embedding": embedding,
+                    "features": embedding,
                 }
 
 
@@ -179,9 +184,6 @@ class BirdNetSpeciesDataModule(pl.LightningDataModule):
             BirdNetSpeciesDataset(self.audio_path, self.test_metadata),
             **self.dataloader_kwargs,
         )
-
-    def predict_dataloader(self):
-        return self.test_dataloader()
 
 
 class BirdNetSoundscapeDataModule(pl.LightningDataModule):

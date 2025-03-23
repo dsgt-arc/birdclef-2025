@@ -1,5 +1,9 @@
-def get_species(year: int = 2024) -> list[str]:
-    if year == 2024:
+from sklearn.preprocessing import LabelEncoder
+from functools import cache
+
+
+def get_species(species_set: str = "2025") -> list[str]:
+    if species_set == "2024":
         return [
             "asbfly",
             "ashdro1",
@@ -184,7 +188,7 @@ def get_species(year: int = 2024) -> list[str]:
             "yebbul3",
             "zitcis1",
         ]
-    elif year == 2025:
+    elif species_set == "2025":
         return [
             "1139490",
             "1192948",
@@ -393,4 +397,9 @@ def get_species(year: int = 2024) -> list[str]:
             "yercac1",
             "ywcpar",
         ]
-    raise ValueError(f"Year {year} is not supported")
+    raise ValueError(f"{species_set} is not supported")
+
+
+@cache
+def get_species_label_encoder(*args, **kwargs) -> LabelEncoder:
+    return LabelEncoder().fit(get_species(*args, **kwargs))

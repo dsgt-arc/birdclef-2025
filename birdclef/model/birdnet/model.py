@@ -60,5 +60,5 @@ class LinearClassifier(pl.LightningModule):
         return self._run_step(batch, batch_idx, "test")
 
     def predict_step(self, batch, batch_idx):
-        batch["prediction"] = torch.sigmoid(self(batch["embedding"]))
+        batch["prediction"] = torch.sigmoid(self(batch["features"]))
         return batch

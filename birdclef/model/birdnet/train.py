@@ -59,10 +59,14 @@ def train_model(
     # Create the model
     if model_type == "linear":
         model = LinearClassifier(
-            num_features=768, num_labels=len(get_species()), learning_rate=learning_rate
+            num_features=1024,
+            num_labels=len(get_species()),
+            learning_rate=learning_rate,
         )
     else:
         raise ValueError(f"Unknown model type: {model_type}")
+
+    print(model)
 
     # Train the model
     data_module = BirdNetSpeciesDataModule(
