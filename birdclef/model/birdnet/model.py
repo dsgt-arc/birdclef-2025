@@ -9,14 +9,13 @@ class LinearClassifier(pl.LightningModule):
         self,
         num_features: int,
         num_labels: int,
-        should_threshold: bool = True,
+        learning_rate: float = 0.002,
         **kwargs,
     ):
         super().__init__()
         self.num_features = num_features
         self.num_labels = num_labels
         self.learning_rate = 0.002
-        self.should_threshold = should_threshold
 
         self.save_hyperparameters()
         self.loss = nn.BCEWithLogitsLoss()
