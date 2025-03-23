@@ -22,10 +22,8 @@ class LinearClassifier(pl.LightningModule):
 
         # normalize the input features, then do a linear regression
         self.model = nn.Sequential(
-            [
-                nn.BatchNorm1d(num_features),
-                nn.Linear(num_features, num_labels),
-            ]
+            nn.BatchNorm1d(num_features),
+            nn.Linear(num_features, num_labels),
         )
 
         self.f1_score = MultilabelF1Score(num_labels=num_labels, average="macro")

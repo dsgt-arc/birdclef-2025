@@ -42,15 +42,13 @@ class BirdNetSpeciesDataset(AudioInferenceIterableDataset):
     def __init__(
         self,
         audio_path: str,
-        metadata_path: str,
-        species: str,
+        metadata: str,
         max_length: int = 4 * 60 / 5,
         limit=None,
     ):
         self.audio_path = audio_path
-        self.species = species
         self.max_length = int(max_length)
-        self.metadata_path = metadata_path
+        self.metadata = metadata
         if limit is not None:
             self.metadata = self.metadata[:limit]
 
@@ -58,7 +56,7 @@ class BirdNetSpeciesDataset(AudioInferenceIterableDataset):
         return len(self.metadata)
 
     def _load_data(self, iter_start, iter_end):
-        model = BirdNetInference(self.metadata_path)
+        model = BirdNetInference()
         # over all rows in the dataset, we provide embeddings of the tracks
         # TODO: we also need to split tracks that are too long by reading them
         # in at most 10 minute chunks
@@ -95,7 +93,7 @@ class BirdNetSoundscapeDataset(AudioInferenceIterableDataset):
         return len(self.soundscapes)
 
     def _load_data(self, iter_start, iter_end):
-        model = BirdNetInference(self.metadata_path)
+        model = BirdNetInference()
         for i in range(iter_start, iter_end):
             path = self.soundscapes[i]
             embeddings, _ = model.predict(path)
@@ -161,37 +159,25 @@ class BirdNetSpeciesDataModule(pl.LightningDataModule):
             "batch_size": self.batch_size,
             "num_workers": self.num_workers,
         }
-        self.dataset_shared_kwargs = {
-            "audio_path": self.audio_path,
-            "metadata_path": self.metadata_path,
-        }
 
     def train_dataloader(self):
         return DataLoader(
             BirdNetSpeciesDataset(
-                self.audio_path,
-                self.train_metadata,
-                self.species,
-                limit=self.limit,
+                self.audio_path, self.train_metadata, limit=self.limit
             ),
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            **self.dataloader_kwargs,
         )
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            BirdNetSpeciesDataset(self.audio_path, self.val_metadata),
+            **self.dataloader_kwargs,
         )
 
     def test_dataloader(self):
         return DataLoader(
-            BirdNetSpeciesDataset(
-                self.audio_path, self.metadata_path, self.species, limit=None
-            ),
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
+            BirdNetSpeciesDataset(self.audio_path, self.test_metadata),
+            **self.dataloader_kwargs,
         )
 
     def predict_dataloader(self):
