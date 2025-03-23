@@ -4,10 +4,10 @@ import torchaudio
 from birdnetlib import RecordingBuffer
 from birdnetlib.analyzer import Analyzer
 from torchaudio.transforms import Resample
-from birdclef.inference.base import Inference
+from birdclef.inference.base import BaseInference
 
 
-class BirdNetInference(Inference):
+class BirdNetInference(BaseInference):
     """Class to perform inference on audio files using a Google Vocalization model."""
 
     def __init__(
@@ -74,7 +74,7 @@ class BirdNetInference(Inference):
 
     def predict(
         self, path: str, window: int = 5, **kwargs
-    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Get embeddings and logits for a single audio file.
 
         :param path: The absolute path to the audio file.

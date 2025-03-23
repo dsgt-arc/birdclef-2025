@@ -5,14 +5,10 @@ import pandas as pd
 from tqdm import tqdm
 
 
-class Inference:
+class BaseInference:
     """Class to perform inference on audio files."""
 
-    def predict(
-        self,
-        path: str,
-        **kwargs,
-    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    def predict(self, path: str, **kwargs) -> tuple[np.ndarray, np.ndarray]:
         """Get embeddings and logits for a single audio file.
 
         :param path: The absolute path to the audio file.
