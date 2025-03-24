@@ -44,7 +44,7 @@ class BirdNetSpeciesDataset(AudioInferenceIterableDataset):
         self,
         audio_path: str,
         metadata: str,
-        max_length: int = 4 * 60 / 5,
+        max_length: int = int(4 * 60 / 5),
         limit=None,
     ):
         self.audio_path = audio_path
@@ -65,9 +65,7 @@ class BirdNetSpeciesDataset(AudioInferenceIterableDataset):
         for i in range(iter_start, iter_end):
             row = self.metadata.iloc[i]
             path = Path(self.audio_path) / row["filename"]
-            embeddings, _ = model.predict(path)
-            embeddings = embeddings[: self.max_length].float()
-            for idx, embedding in enumerate(embeddings):
+            for idx, (embedding, _) in enumerate(model.predict(path)):
                 label = torch.zeros(len(le.classes_))
                 label[le.transform([row["primary_label"]])] = 1
                 yield {
@@ -85,7 +83,7 @@ class BirdNetSoundscapeDataset(AudioInferenceIterableDataset):
         self,
         soundscape_path: str,
         metadata_path: str,
-        max_length: int = 4 * 60 / 5,
+        max_length: int = int(4 * 60 / 5),
         limit=None,
     ):
         self.soundscapes = sorted(Path(soundscape_path).glob("**/*.ogg"))
@@ -101,9 +99,7 @@ class BirdNetSoundscapeDataset(AudioInferenceIterableDataset):
         model = BirdNetInference()
         for i in range(iter_start, iter_end):
             path = self.soundscapes[i]
-            embeddings, _ = model.predict(path)
-            embeddings = embeddings[: self.max_length].float()
-            for idx, embedding in enumerate(embeddings):
+            for idx, (embedding, _) in enumerate(model.predict(path)):
                 yield {
                     "row_id": f"{path.stem}_{(idx + 1) * 5}",
                     "features": embedding,

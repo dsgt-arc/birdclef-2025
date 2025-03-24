@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional
 import shutil
 
+import torch
 import lightning as pl
 import typer
 from lightning.pytorch.callbacks import EarlyStopping, ModelCheckpoint
@@ -29,11 +30,16 @@ def train_model(
     val_size: float = typer.Option(0.15, help="Validation set size ratio"),
     test_size: float = typer.Option(0.15, help="Test set size ratio"),
     patience: int = typer.Option(5, help="Early stopping patience"),
+    accelerator: str = typer.Option("cuda", help="Accelerator to use"),
 ):
     """Train a bird classification model using BirdNet embeddings."""
     # Create output directory
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+
+    # check cuda exists, and number of devices
+    print(f"Number of GPUs: {torch.cuda.device_count()}")
+    print(f"CUDA available: {torch.cuda.is_available()}")
 
     # Configure trainer
     checkpoint_callback = ModelCheckpoint(
@@ -53,7 +59,9 @@ def train_model(
             save_dir=str(output_path / "logs"), name=f"{model_type}_{timestamp}"
         ),
         callbacks=[checkpoint_callback, early_stop_callback],
-        accelerator="auto",
+        accelerator=accelerator,
+        devices="auto",
+        strategy="auto",
     )
 
     # Create the model
@@ -92,3 +100,7 @@ def train_model(
         print(f"Best model saved to {final_model_path}")
 
     return best_model_path
+
+
+if __name__ == "__main__":
+    typer.run(train_model)

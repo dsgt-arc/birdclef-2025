@@ -1,6 +1,7 @@
 from functools import partial
 
-import numpy as np
+import torch
+from typing import Iterable, Tuple, Optional
 import pandas as pd
 from tqdm import tqdm
 
@@ -8,7 +9,9 @@ from tqdm import tqdm
 class BaseInference:
     """Class to perform inference on audio files."""
 
-    def predict(self, path: str, **kwargs) -> tuple[np.ndarray, np.ndarray]:
+    def predict(
+        self, path: str, **kwargs
+    ) -> Iterable[Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]]:
         """Get embeddings and logits for a single audio file.
 
         :param path: The absolute path to the audio file.
@@ -23,13 +26,23 @@ class BaseInference:
         :param suffix: The filename of the audio file.
         """
         path = f"{root}/{suffix}"
-        embeddings, logits = self.predict(path)
-        indices = range(embeddings.shape[0])
+        embeddings = []
+        logits = []
+        # TODO: need to double check that this still works properly
+        for embedding, logit in self.predict(path):
+            embeddings.append(embedding)
+            if logit is not None:
+                logits.append(logit)
+        indices = range(len(embeddings))
         df = pd.DataFrame(
-            {"name": f"{suffix}", "chunk_5s": indices, "embedding": embeddings.tolist()}
+            {
+                "name": f"{suffix}",
+                "chunk_5s": indices,
+                "embedding": torch.stack(embeddings).tolist(),
+            }
         )
-        if logits is not None:
-            df["logits"] = logits.tolist()
+        if logits:
+            df["logits"] = torch.stack(logits).tolist()
         return df
 
     def predict_species_df(

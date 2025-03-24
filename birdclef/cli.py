@@ -7,3 +7,6 @@ app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 app.add_typer(eda_app, name="eda")
 app.add_typer(etl_app, name="etl")
 app.add_typer(model_app, name="model")
+
+if __name__ == "__main__":
+    app()
