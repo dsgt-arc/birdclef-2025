@@ -5,7 +5,45 @@ authors = [{ name = "Anthony Miyaguchi", email = "acmiyaguchi@gatech.edu" }]
 description = "DS@GT BirdCLEF helper package"
 readme = "README.md"
 requires-python = ">=3.8"
-dynamic = ["dependencies"]
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "tqdm",
+    "pyspark >= 3.4.0",
+    "pyarrow",
+    "scikit-learn",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "librosa",
+    "sox",
+    "soundfile",
+    "ffmpeg-python",
+    "lightning",
+    "torchmetrics",
+    "numba",
+    "pacmap",
+    # "birdnetlib",
+    "birdnetlib@git+https://github.com/dsgt-kaggle-clef/birdnetlib.git#2fa71ee549dd9dacc6a18d382c054632c5531998",
+    # we get weird tensorflow allocation errors otherwise,
+    # https://github.com/joeweiss/birdnetlib/issues/125,
+    "tensorflow==2.16.1",
+    "typer",
+    "stumpy",
+    "luigi",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pip",
+    "uv",
+    "jupyterlab",
+    "ruff",
+    "pre-commit",
+    "pytest",
+    "pace-job-monitoring@git+https://github.com/dsgt-kaggle-clef/pace-job-monitoring.git#main",
+]
 
 [project.urls]
 Homepage = "https://github.com/dsgt-kaggle-clef/birdclef-2025"
@@ -13,13 +51,11 @@ Issues = "https://github.com/dsgt-kaggle-clef/birdclef-2025/issues"
 
 [project.scripts]
 birdclef-eda-duration = "birdclef.eda.duration:main"
+birdclef = "birdclef.cli:app"
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
-
-[tool.setuptools.dynamic]
-dependencies = { file = "requirements.txt" }
 
 [tool.setuptools.packages.find]
 where = ["."]

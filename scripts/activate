@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+#
+# Activates the environment. Ensure this is run before
+# running any other scripts in this directory.
+#
+# Run with:
+#    source scripts/activate
+#
+# don't use bash_source since it gets called from other scripts
+SCRIPT_PARENT_ROOT=$(dirname $(realpath ${BASH_SOURCE[0]}))
+
+# adds the scripts directory to the path
+PATH="$HOME/.local/bin:$SCRIPT_PARENT_ROOT:$PATH"
+
+# for large models and datasets from huggingface/transformers
+XDG_CACHE_HOME="$HOME/scratch/.cache"
+HF_HOME="$XDG_CACHE_HOME/huggingface"
+
+PYTEST_DEBUG_TEMPROOT="$HOME/scratch/pytest-tmp"
+mkdir -p $PYTEST_DEBUG_TEMPROOT
+
+# NOTE: uv cache is also set in the pyproject
+source $SCRIPT_PARENT_ROOT/utils/slurm-venv.sh
+
+# exports
+export PATH
+export XDG_CACHE_HOME
+export HF_HOME
+export PYTEST_DEBUG_TEMPROOT

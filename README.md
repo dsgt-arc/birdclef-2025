@@ -4,30 +4,63 @@
 
 ## quickstart
 
+We recommend using `uv` for all packaging related commands.
+
+```bash
+pip install uv
+uv --help
+```
+
 Install the pre-commit hooks for formatting code:
 
 ```bash
+uv tool install pre-commit
 pre-commit install
 ```
 
-We are generally using a shared VM with limited space.
-Install packages to the system using sudo:
+## activating the python environment
+
+### PACE
+
+If you are running on PACE, then run the following command to activate the environment:
 
 ```bash
-sudo pip install -r requirements.txt
+source scripts/activate
 ```
 
-We can ignore the following message since we know what we are doing:
+This will activate the virtual environment and setup packages and cache directories.
+This script is also used within sbatch jobs.
 
-```
-WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
-```
+### localhost
 
-This should allow all users to use the packages without having to install them multiple times.
-This is a problem with very large packages like `torch` and `spark`.
-
-Then install the current package into your local user directory, so changes that you make are local to your own users.
+Follow typical python packaging conventions.
+Create a virtual environment and install it in editable mode.
 
 ```bash
-pip install -e .
+# create a virtualenvironment
+uv venv
+
+# activate it
+source .venv/bin/activate
+
+# install the package
+uv pip install -e ".[dev]"
+```
+
+## validating install
+
+Make sure the package works as expected:
+
+```bash
+birdclef --help
+```
+
+Run the tests:
+
+```bash
+# if you are on PACE
+./scripts/slurm-test
+
+# if you are on localhost
+pytest -vv tests
 ```

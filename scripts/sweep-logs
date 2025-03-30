@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set +eux
+dir=${1:-logs}
+mkdir -p $dir
+mv Report* $dir/

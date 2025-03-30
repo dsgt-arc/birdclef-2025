@@ -10,3 +10,5 @@ lightning_logs
 /logs*
 node_modules/
 build/
+.venv
+Report-*
