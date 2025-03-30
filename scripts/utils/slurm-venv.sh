@@ -8,7 +8,7 @@ SCRIPT_PARENT_ROOT=$(
 
 # choose the module depending if this being run on slurm or not
 MODULE_PATH=$(dirname $SCRIPT_PARENT_ROOT)
-VENV_PARENT_ROOT=${1:-~/scratch/animalclef}
+VENV_PARENT_ROOT=${1:-~/scratch/birdclef}
 VENV_PARENT_ROOT=$(realpath $VENV_PARENT_ROOT)
 
 # use an updated version of python and set the include path for wheels
