@@ -1,3 +1,4 @@
+from typing import Optional
 import luigi
 import typer
 from typing_extensions import Annotated
@@ -31,7 +32,7 @@ def embed_soundscapes(
     audio_path: Annotated[str, typer.Argument(help="Path to audio files")],
     output_path: Annotated[str, typer.Argument(help="Path to output data")],
     total_batches: Annotated[int, typer.Option(help="Total number of batches")] = 200,
-    limit: Annotated[int | None, typer.Option(help="Limit the number of files")] = None,
+    limit: Annotated[Optional[int], typer.Option(help="Limit the number of files")] = None,
     scheduler_host: Annotated[str, typer.Option(help="Scheduler host")] = None,
 ):
     """Embed soundscapes using BirdNet."""
