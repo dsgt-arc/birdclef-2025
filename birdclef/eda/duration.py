@@ -6,7 +6,6 @@ from tqdm import tqdm
 import pandas as pd
 import librosa
 from pathlib import Path
-from argparse import ArgumentParser
 
 
 class DurationTask(luigi.Task):
@@ -52,21 +51,18 @@ class DurationTask(luigi.Task):
         print(f"total of {df.duration.sum() / 3600} hours of audio")
 
 
-def main():
-    parser = ArgumentParser()
-    parser.add_argument("--root", type=str, default="~/p-dsgt_clef2025-0/birdclef")
-    args = parser.parse_args()
-    root = Path(args.root).expanduser()
+def duration(root: str = "~/shared/birdclef"):
+    root = Path(root).expanduser().resolve()
     luigi.build(
         [
             DurationTask(
                 input_path=f"{root}/raw/birdclef-2024",
                 output_path=f"{root}/processed/birdclef-2024/durations.parquet",
-            )
+            ),
+            DurationTask(
+                input_path=f"{root}/raw/birdclef-2025",
+                output_path=f"{root}/processed/birdclef-2025/durations.parquet",
+            ),
         ],
         local_scheduler=True,
     )
-
-
-if __name__ == "__main__":
-    main()
