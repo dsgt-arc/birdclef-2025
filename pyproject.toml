@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = [{ name = "Anthony Miyaguchi", email = "acmiyaguchi@gatech.edu" }]
 description = "DS@GT BirdCLEF helper package"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 dependencies = [
     "numpy",
     "pandas",
@@ -50,7 +50,6 @@ Homepage = "https://github.com/dsgt-kaggle-clef/birdclef-2025"
 Issues = "https://github.com/dsgt-kaggle-clef/birdclef-2025/issues"
 
 [project.scripts]
-birdclef-eda-duration = "birdclef.eda.duration:main"
 birdclef = "birdclef.cli:app"
 
 [build-system]

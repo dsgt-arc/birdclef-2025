@@ -27,7 +27,7 @@ asbfly,[],['call'],21.1697,70.6005,Muscicapa dauurica,Asian Brown Flycatcher,vir
 
 @pytest.fixture
 def species():
-    return get_species(year=2024)
+    return get_species(species_set="2024")
 
 
 @pytest.fixture

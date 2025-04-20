@@ -1,7 +1,6 @@
 import luigi
 import pandas as pd
 
-
 from birdclef.luigi import maybe_gcs_target
 from birdclef.spark import spark_resource
 
