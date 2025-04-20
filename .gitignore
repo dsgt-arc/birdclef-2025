@@ -12,3 +12,5 @@ node_modules/
 build/
 .venv
 Report-*
+*.tflite
+notebooks/**/*.txt
