@@ -1,24 +1,15 @@
 import torch
+import tensorflow as tf
 
-# PyTorch CUDA detection
-if torch.cuda.is_available():
-    device_count = torch.cuda.device_count()
-    if device_count > 0:
-        _ = torch.cuda.get_device_name(0)
-    print(
-        f"CUDA initialized early: available={torch.cuda.is_available()}, devices={device_count}"
-    )
 
-# TensorFlow GPU detection
-try:
-    import tensorflow as tf
+def is_gpu_enabled():
+    """Check if either PyTorch or TensorFlow detects an available GPU."""
+    pytorch_gpu = torch.cuda.is_available()
+    tensorflow_gpu = len(tf.config.list_physical_devices("GPU")) > 0
+    return pytorch_gpu or tensorflow_gpu
 
-    gpus = tf.config.list_physical_devices("GPU")
-    if gpus:
-        for gpu in gpus:
-            print(f"TensorFlow GPU found: {gpu}")
-        print(f"TensorFlow initialized early: available GPUs={len(gpus)}")
-    else:
-        print("No TensorFlow GPU available")
-except ImportError:
-    print("TensorFlow not installed")
+
+if is_gpu_enabled():
+    print("GPU is enabled via PyTorch or TensorFlow.")
+else:
+    print("No GPU enabled via PyTorch or TensorFlow.")

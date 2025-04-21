@@ -6,6 +6,7 @@ import luigi
 import typer
 from contexttimer import Timer
 from rich import print
+from birdclef import is_gpu_enabled
 
 app = typer.Typer()
 
@@ -56,32 +57,13 @@ class ProcessPartition(luigi.Task, OptionsMixin):
 
         if not audio_files_subset:
             print(f"No files found for partition {self.part}. Skipping.")
-            # Create empty outputs if no files
-            for target in self.output().values():
-                target.makedirs()
-                if target.path.endswith(".json"):
-                    with target.open("w") as f:
-                        json.dump(
-                            {
-                                "part_name": f"part_{self.part:04d}",
-                                "num_files": 0,
-                                "elapsed": 0,
-                            },
-                            f,
-                        )
-                else:  # parquet
-                    import pandas as pd
-
-                    pd.DataFrame().to_parquet(target.path)
-            return
 
         for target in self.output().values():
             target.makedirs()
 
         with Timer() as t:
             results = model.embed(
-                [p.as_posix() for p in audio_files_subset],
-                return_preds=True,
+                [p.as_posix() for p in audio_files_subset], return_preds=True
             )
 
         embed_df, predict_df = results
@@ -141,6 +123,8 @@ def process_audio(
     num_workers: int = 1,
 ):
     """Process audio under a directory using parallel Luigi workers."""
+    if is_gpu_enabled():
+        print("GPU is enabled via PyTorch or TensorFlow.")
     luigi.build(
         [
             ProcessAudio(
@@ -157,7 +141,4 @@ def process_audio(
 
 
 if __name__ == "__main__":
-    import multiprocessing as mp
-
-    mp.set_start_method("spawn")
     app()
