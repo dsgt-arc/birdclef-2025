@@ -19,7 +19,7 @@ class OptionsMixin:
         description="Directory to save the output files",
     )
     model_name = luigi.ChoiceParameter(
-        choices=list(bmz.list_models.keys()),
+        choices=list(bmz.list_models().keys()),
         default="BirdNET",
         description="Model to use for processing audio",
     )
@@ -46,7 +46,7 @@ class ProcessAudio(luigi.Task, OptionsMixin):
 
         We process the audio so we get both the predictions and the embeddings.
         """
-        model = bmz.list_models[self.model_name]
+        model = bmz.list_models()[self.model_name]
         audio_files = sorted(Path(self.input_root).expanduser().glob("**/*.ogg"))
 
         for part in tqdm(list(range(self.num_partitions))):
