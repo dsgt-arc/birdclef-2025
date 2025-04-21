@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=infer --account=paceship-dsgt_clef2025
-#SBATCH -N1 -n1 --cpus-per-task=24 --mem-per-cpu=4G
+#SBATCH -N1 -n1 --cpus-per-task=24 --mem-per-cpu=8G
 #SBATCH -t240 -qinferno -oReport-%j.out
 set -eu
 source ~/scratch/birdclef/.venv/bin/activate
@@ -18,5 +18,5 @@ python -m birdclef.infer.workflow process-audio \
     $project_dir/raw/birdclef-2025/train_soundscapes \
     $project_dir/2025/infer-soundscape-cpu \
     --model-name ${1:-"BirdNET"} \
-    --num-workers ${NUM_WORKERS:-6} \
+    --num-workers ${NUM_WORKERS:-24} \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)

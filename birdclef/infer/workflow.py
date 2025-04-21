@@ -6,7 +6,6 @@ import luigi
 import typer
 from contexttimer import Timer
 from rich import print
-from tqdm import tqdm
 
 app = typer.Typer()
 
@@ -31,73 +30,98 @@ class OptionsMixin:
         default=-1,
         description="Limit the number of audio files to process",
     )
-    num_workers = luigi.IntParameter(
-        default=1,
-        description="Number of workers to use for processing",
-    )
 
 
-class ProcessAudio(luigi.Task, OptionsMixin):
+class ProcessPartition(luigi.Task, OptionsMixin):
+    part = luigi.IntParameter(description="Partition number to process")
+
     def output(self):
-        return luigi.LocalTarget(f"{self.output_root}/parts/_SUCCESS")
+        part_name = f"part_{self.part:04d}"
+        output_dir = Path(self.output_root).expanduser() / "parts"
+        return {
+            "embed": luigi.LocalTarget(output_dir / f"embed/{part_name}.parquet"),
+            "predict": luigi.LocalTarget(output_dir / f"predict/{part_name}.parquet"),
+            "timing": luigi.LocalTarget(output_dir / f"timing/{part_name}.json"),
+        }
 
     def run(self):
-        """Process audio files using the specified model.
-
-        We process the audio so we get both the predictions and the embeddings.
-        """
+        """Process a single partition of audio files."""
         model = bmz.list_models()[self.model_name]()
         audio_files = sorted(Path(self.input_root).expanduser().glob("**/*.ogg"))
 
-        for part in tqdm(list(range(self.num_partitions))):
-            if self.limit > 0 and part >= self.limit:
-                break
-            # determine the subset of audio files to process for idempotent processing
-            audio_files_subset = [
-                p for i, p in enumerate(audio_files) if i % self.num_partitions == part
-            ]
+        # Determine the subset of audio files for this partition
+        audio_files_subset = [
+            p for i, p in enumerate(audio_files) if i % self.num_partitions == self.part
+        ]
 
-            # generate the output paths
-            part_name = f"part_{part:04d}"
-            output_paths = [
-                (
-                    Path(self.output_root).expanduser()
-                    / f"parts/{method_name}/{part_name}.parquet"
-                )
-                for method_name in ["embed", "predict"]
-            ]
-            for output_path in output_paths:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-            if all([p.exists() for p in output_paths]):
-                print(f"Skipping {part_name} as it already exists.")
-                continue
+        if not audio_files_subset:
+            print(f"No files found for partition {self.part}. Skipping.")
+            # Create empty outputs if no files
+            for target in self.output().values():
+                target.makedirs()
+                if target.path.endswith(".json"):
+                    with target.open("w") as f:
+                        json.dump(
+                            {
+                                "part_name": f"part_{self.part:04d}",
+                                "num_files": 0,
+                                "elapsed": 0,
+                            },
+                            f,
+                        )
+                else:  # parquet
+                    import pandas as pd
 
-            # process the actual files
-            with Timer() as t:
-                results = model.embed(
-                    [p.as_posix() for p in audio_files_subset],
-                    return_preds=True,
-                    num_workers=self.num_workers,
-                )
-            for path, df in zip(output_paths, results):
-                df.reset_index().to_parquet(path, index=False)
-            # write out the timing information
-            path = (
-                Path(self.output_root).expanduser() / f"parts/timing/{part_name}.json"
+                    pd.DataFrame().to_parquet(target.path)
+            return
+
+        for target in self.output().values():
+            target.makedirs()
+
+        with Timer() as t:
+            results = model.embed(
+                [p.as_posix() for p in audio_files_subset],
+                return_preds=True,
             )
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("w") as f:
-                json.dump(
-                    {
-                        "part_name": part_name,
-                        "num_files": len(audio_files_subset),
-                        "elapsed": t.elapsed,
-                    },
-                    f,
-                )
+
+        embed_df, predict_df = results
+        embed_df.reset_index().to_parquet(self.output()["embed"].path, index=False)
+        predict_df.reset_index().to_parquet(self.output()["predict"].path, index=False)
+
+        with self.output()["timing"].open("w") as f:
+            json.dump(
+                {
+                    "part_name": f"part_{self.part:04d}",
+                    "num_files": len(audio_files_subset),
+                    "elapsed": t.elapsed,
+                },
+                f,
+            )
+
+
+class ProcessAudio(luigi.Task, OptionsMixin):
+    def requires(self):
+        """Define dependencies: one ProcessPartition task for each partition."""
+        num_parts_to_process = self.limit if self.limit > 0 else self.num_partitions
+        for part in range(num_parts_to_process):
+            yield ProcessPartition(
+                input_root=self.input_root,
+                output_root=self.output_root,
+                model_name=self.model_name,
+                num_partitions=self.num_partitions,
+                part=part,
+            )
+
+    def output(self):
+        """Output is a success flag indicating all partitions are done."""
+        return luigi.LocalTarget(f"{self.output_root}/_SUCCESS")
+
+    def run(self):
+        """Create the success flag file once all dependencies are met."""
+        # Logic moved to ProcessPartition. This task just aggregates.
+        print(f"All partitions processed for {self.model_name}.")
         with self.output().open("w") as f:
             f.write("")
-        print(f"Finished processing {len(audio_files)} files.")
 
 
 @app.command()
@@ -114,9 +138,9 @@ def process_audio(
     model_name: str = "BirdNET",
     num_partitions: int = 200,
     limit: int = -1,
-    num_workers: int = 0,
+    num_workers: int = 1,
 ):
-    """Process audio under a directory."""
+    """Process audio under a directory using parallel Luigi workers."""
     luigi.build(
         [
             ProcessAudio(
@@ -125,12 +149,15 @@ def process_audio(
                 model_name=model_name,
                 num_partitions=num_partitions,
                 limit=limit,
-                num_workers=num_workers,
             )
         ],
         local_scheduler=True,
+        workers=num_workers,
     )
 
 
 if __name__ == "__main__":
+    import multiprocessing as mp
+
+    mp.set_start_method("spawn")
     app()
