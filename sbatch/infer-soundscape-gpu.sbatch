@@ -16,7 +16,7 @@ scratch_dir=$(realpath ~/scratch/birdclef)
 
 python -m birdclef.infer.workflow process-audio \
     $project_dir/raw/birdclef-2025/train_soundscapes \
-    $scratch_dir/2025/infer-soundscape-gpu \
+    $project_dir/2025/infer-soundscape \
     --model-name ${1:-"BirdNET"} \
     --num-workers ${NUM_WORKERS:-6} \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)

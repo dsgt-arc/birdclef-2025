@@ -46,7 +46,7 @@ class ProcessAudio(luigi.Task, OptionsMixin):
 
         We process the audio so we get both the predictions and the embeddings.
         """
-        model = bmz.list_models()[self.model_name]
+        model = bmz.list_models()[self.model_name]()
         audio_files = sorted(Path(self.input_root).expanduser().glob("**/*.ogg"))
 
         for part in tqdm(list(range(self.num_partitions))):
@@ -60,8 +60,10 @@ class ProcessAudio(luigi.Task, OptionsMixin):
             # generate the output paths
             part_name = f"part_{part:04d}"
             output_paths = [
-                Path(self.output_root).expanduser()
-                / f"parts/{method_name}/{part_name}.parquet"
+                (
+                    Path(self.output_root).expanduser()
+                    / f"parts/{method_name}/{part_name}.parquet"
+                )
                 for method_name in ["embed", "predict"]
             ]
             for output_path in output_paths:
@@ -73,7 +75,7 @@ class ProcessAudio(luigi.Task, OptionsMixin):
             # process the actual files
             with Timer() as t:
                 results = model.embed(
-                    audio_files_subset,
+                    [p.as_posix() for p in audio_files_subset],
                     return_preds=True,
                     num_workers=self.num_workers,
                 )
@@ -125,7 +127,8 @@ def process_audio(
                 limit=limit,
                 num_workers=num_workers,
             )
-        ]
+        ],
+        local_scheduler=True,
     )
 
 
