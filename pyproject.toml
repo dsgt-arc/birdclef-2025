@@ -1,6 +1,6 @@
 [project]
 name = "birdclef"
-version = "0.1.0"
+version = "0.2.0"
 authors = [{ name = "Anthony Miyaguchi", email = "acmiyaguchi@gatech.edu" }]
 description = "DS@GT BirdCLEF helper package"
 readme = "README.md"
@@ -24,14 +24,21 @@ dependencies = [
     "torchmetrics",
     "numba",
     "pacmap",
-    # "birdnetlib",
-    "birdnetlib@git+https://github.com/dsgt-kaggle-clef/birdnetlib.git#2fa71ee549dd9dacc6a18d382c054632c5531998",
-    # we get weird tensorflow allocation errors otherwise,
-    # https://github.com/joeweiss/birdnetlib/issues/125,
-    "tensorflow==2.16.1",
     "typer",
     "stumpy",
     "luigi",
+    "opensoundscape>=0.12.0",
+    "bioacoustics-model-zoo",
+    "tensorflow-hub",
+    "timm",
+    "transformers",
+    "contexttimer",
+    # 2.18 requires cudnn 9.3
+    # torch 2.5 targets cudnn 9.1 via lightning 2.5
+    # ensure cuda/11.8.0 cudnn/8.5.0.96-11.7-cuda loaded
+    "tensorflow==2.17",
+    "tensorrt",
+    "ai-edge-litert>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -49,9 +56,6 @@ dev = [
 Homepage = "https://github.com/dsgt-kaggle-clef/birdclef-2025"
 Issues = "https://github.com/dsgt-kaggle-clef/birdclef-2025/issues"
 
-[project.scripts]
-birdclef = "birdclef.cli:app"
-
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
@@ -60,3 +64,6 @@ build-backend = "setuptools.build_meta"
 where = ["."]
 include = ["birdclef*"]
 namespaces = false
+
+[tool.uv.sources]
+bioacoustics-model-zoo = { git = "https://github.com/kitzeslab/bioacoustics-model-zoo" }

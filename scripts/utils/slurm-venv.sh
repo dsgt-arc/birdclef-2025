@@ -12,7 +12,6 @@ VENV_PARENT_ROOT=${1:-~/scratch/birdclef}
 VENV_PARENT_ROOT=$(realpath $VENV_PARENT_ROOT)
 
 # use an updated version of python and set the include path for wheels
-module load python/3.10
 PYTHON_ROOT=$(python -c 'import sys; print(sys.base_prefix)')
 export CPATH=$PYTHON_ROOT/include/python3.10:$CPATH
 
