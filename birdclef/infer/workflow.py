@@ -47,6 +47,7 @@ class ProcessPartition(luigi.Task, OptionsMixin):
 
     def run(self):
         """Process a single partition of audio files."""
+
         model = bmz.list_models()[self.model_name]()
         audio_files = sorted(Path(self.input_root).expanduser().glob("**/*.ogg"))
 
@@ -121,10 +122,13 @@ def process_audio(
     num_partitions: int = 200,
     limit: int = -1,
     num_workers: int = 1,
+    assert_gpu: bool = False,
 ):
     """Process audio under a directory using parallel Luigi workers."""
-    if is_gpu_enabled():
-        print("GPU is enabled via PyTorch or TensorFlow.")
+    if assert_gpu and not is_gpu_enabled():
+        raise RuntimeError(
+            "GPU is not enabled. Please check your PyTorch or TensorFlow installation."
+        )
     luigi.build(
         [
             ProcessAudio(
@@ -141,4 +145,7 @@ def process_audio(
 
 
 if __name__ == "__main__":
+    import multiprocessing
+
+    multiprocessing.set_start_method("spawn")
     app()
