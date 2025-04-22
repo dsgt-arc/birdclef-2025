@@ -5,5 +5,6 @@ apptainer exec \
     --writable-tmpfs \
     --cleanenv \
     --nv \
+    --cwd ~/scratch/birdclef/models \
     ~/scratch/birdclef/app.sif \
     bash --noprofile --norc

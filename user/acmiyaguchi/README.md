@@ -10,7 +10,7 @@ Here I just create an apptainer environment with the right dependencies and then
 This is the command im using for testing:
 
 ```bash
-python -m birdclef.infer.workflow process-audio /storage/coda1/p-dsgt_clef2025/0/shared/birdclef/raw/birdclef-2025/train_soundscapes ~/scratch/birdclef/2025/infer-soundscape --assert-gpu --model-name Perch --num-workers 2
+python -m birdclef.infer.workflow process-audio /storage/coda1/p-dsgt_clef2025/0/shared/birdclef/raw/birdclef-2025/train_soundscapes ~/scratch/birdclef/2025/infer-soundscape --assert-gpu --model-name Perch --num-workers 1 --limit 4
 ```
 
 I can't do torch 2.5.1 and tensorflow 2.18 a the same time because I need cudnn 9.3.

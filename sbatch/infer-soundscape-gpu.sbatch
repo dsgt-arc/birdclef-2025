@@ -5,6 +5,10 @@
 set -eux
 hostname
 
+nvidia-smi
+project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
+scratch_dir=$(realpath ~/scratch/birdclef)
+
 # manually build the necessary sif files via scripts/build-apptainer.sh
 apptainer exec \
     --writable-tmpfs \
@@ -12,14 +16,9 @@ apptainer exec \
     --nv \
     --cwd ~/scratch/birdclef/models \
     ~/scratch/birdclef/app.sif \
-    bash << 'EOF'
+    bash << EOF
 source ~/scratch/birdclef/app/.venv/bin/activate
 set -eux
-nvidia-smi
-
-project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
-scratch_dir=$(realpath ~/scratch/birdclef)
-
 python -m birdclef.infer.workflow process-audio \
     $project_dir/raw/birdclef-2025/train_soundscapes \
     $project_dir/2025/infer-soundscape \
