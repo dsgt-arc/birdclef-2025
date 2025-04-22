@@ -13,7 +13,7 @@ dependencies = [
     "pyspark >= 3.4.0",
     "pyarrow",
     "scikit-learn",
-    "torch==2.5.1",
+    "torch",
     "torchvision",
     "torchaudio",
     "librosa",
@@ -36,8 +36,9 @@ dependencies = [
     # 2.18 requires cudnn 9.3
     # torch 2.5 targets cudnn 9.1 via lightning 2.5
     # ensure cuda/11.8.0 cudnn/8.5.0.96-11.7-cuda loaded
-    "tensorflow==2.15",
+    "tensorflow==2.17",
     "tensorrt",
+    "ai-edge-litert>=1.2.0",
 ]
 
 [project.optional-dependencies]
@@ -66,14 +67,3 @@ namespaces = false
 
 [tool.uv.sources]
 bioacoustics-model-zoo = { git = "https://github.com/kitzeslab/bioacoustics-model-zoo" }
-torch = [
-  { index = "pytorch-cu121", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-torchvision = [
-  { index = "pytorch-cu121", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
-]
-
-[[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu118"
-explicit = true

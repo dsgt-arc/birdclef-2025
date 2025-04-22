@@ -1,0 +1,30 @@
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+
+%environment
+    export DEBIAN_FRONTEND=noninteractive
+    export PATH=$HOME/.local/bin:$PATH
+    export XDG_CACHE_HOME="$HOME/scratch/.cache"
+
+%post
+    # Update and install base dependencies, Java, Python, Maven
+    apt-get update && apt-get install -y \
+        default-jdk \
+        python3 \
+        python3-pip \
+        python3-venv \
+        maven \
+        curl \
+        wget \
+        git \
+        vim \
+        bash \
+        tmux \
+        htop \
+        nvtop \
+        nvidia-utils-570 \
+        build-essential \
+        ca-certificates
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    update-ca-certificates
+    mkdir /app
