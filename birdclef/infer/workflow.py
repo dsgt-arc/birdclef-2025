@@ -6,7 +6,7 @@ import luigi
 import typer
 from contexttimer import Timer
 from rich import print
-from birdclef import is_gpu_enabled
+from birdclef.gpu import is_gpu_enabled
 
 app = typer.Typer()
 
