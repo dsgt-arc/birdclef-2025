@@ -39,6 +39,7 @@ dependencies = [
     "tensorflow==2.17",
     "tensorrt",
     "ai-edge-litert>=1.2.0",
+    "fast-hdbscan>=0.2.2",
 ]
 
 [project.optional-dependencies]
