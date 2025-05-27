@@ -76,8 +76,10 @@ class ProcessPartition(luigi.Task, OptionsMixin):
         if not audio_files_subset:
             print(f"No files found for partition {self.part}. Skipping.")
 
-        for target in self.output().values():
-            target.makedirs()
+        # for target in self.output().values():
+        #     target.makedirs()
+        for key in ["embed", "predict", "timing"]:
+            Path(self.output()[key].path).parent.mkdir(parents=True, exist_ok=True)
 
         with Timer() as t:
             results = model.embed(
@@ -110,7 +112,7 @@ class ProcessAudio(luigi.Task, OptionsMixin):
             limit = self.limit if self.limit > 0 else self.num_partitions
             parts_to_process = range(limit)
 
-        for part in range(parts_to_process):
+        for part in parts_to_process:
             yield ProcessPartition(
                 input_root=self.input_root,
                 output_root=self.output_root,
@@ -146,7 +148,7 @@ def process_audio(
     input_root: str,
     output_root: str,
     model_name: str = "BirdNET",
-    clip_step: int = 5,
+    clip_step: float = 5.0,
     num_partitions: int = 200,
     use_subset: bool = False,
     subset_size: int = 5,
