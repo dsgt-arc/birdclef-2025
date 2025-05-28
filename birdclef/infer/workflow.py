@@ -7,6 +7,7 @@ import typer
 from contexttimer import Timer
 from rich import print
 from birdclef import is_gpu_enabled
+from .model_config import model_config
 
 app = typer.Typer()
 
@@ -148,7 +149,6 @@ def process_audio(
     input_root: str,
     output_root: str,
     model_name: str = "BirdNET",
-    clip_step: float = 5.0,
     num_partitions: int = 200,
     use_subset: bool = False,
     subset_size: int = 5,
@@ -161,6 +161,7 @@ def process_audio(
         raise RuntimeError(
             "GPU is not enabled. Please check your PyTorch or TensorFlow installation."
         )
+    clip_step = model_config[model_name]["clip_step"]
     luigi.build(
         [
             ProcessAudio(

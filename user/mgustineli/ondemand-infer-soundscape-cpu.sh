@@ -15,12 +15,20 @@ cd ~/scratch/birdclef/models
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 dataset_name=train_audio
+model_name=${1:-"Perch"}
+# model names:
+# - BirdNET
+# - YAMNet
+# - Perch
+# - HawkEars
+# - BirdSetConvNeXT
+# - BirdSetEfficientNetB1
+# - RanaSierraeCNN
 
 python -m birdclef.infer.workflow process-audio \
     $project_dir/raw/birdclef-2025/$dataset_name \
     $scratch_dir/data/2025/subset-${dataset_name}-infer-soundscape-cpu \
-    --model-name ${1:-"BirdNET"} \
-    --clip-step 1.0 \
+    --model-name $model_name \
     --use-subset \
     --subset-size 5 \
     --num-workers ${NUM_WORKERS:-24} \
