@@ -18,5 +18,8 @@ python -m birdclef.infer.workflow process-audio \
     $project_dir/raw/birdclef-2025/train_soundscapes \
     $project_dir/2025/infer-soundscape-cpu \
     --model-name ${1:-"BirdNET"} \
+    --clip-step 5.0 \
     --num-workers ${NUM_WORKERS:-24} \
-    $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)
+    $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi) \
+    $(if [ "${USE_SUBSET:-false}" = "true" ]; then echo "--use-subset"; fi) \
+    $(if [ -n "${SUBSET_SIZE:-}" ]; then echo "--subset-size $SUBSET_SIZE"; fi)
