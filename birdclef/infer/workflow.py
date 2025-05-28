@@ -40,9 +40,6 @@ class OptionsMixin:
         default=False,
         description="If True, process only a subset of the audio files for debugging or testing.",
     )
-    subset_size = luigi.IntParameter(
-        default=5, description="Number of audio files to process if use_subset=True."
-    )
 
 
 class ProcessPartition(luigi.Task, OptionsMixin):
@@ -61,24 +58,35 @@ class ProcessPartition(luigi.Task, OptionsMixin):
         """Process a single partition of audio files."""
 
         model = bmz.list_models()[self.model_name]()
-        audio_files = sorted(Path(self.input_root).expanduser().glob("**/*.ogg"))
+        input_path = Path(self.input_root).expanduser()
 
-        # Determine the subset of audio files for this partition
+        if self.use_subset:
+            # only use species directories that have letters in their names
+            species_dirs = sorted(
+                [
+                    d
+                    for d in input_path.iterdir()
+                    if d.is_dir() and any(c.isalpha() for c in d.name)
+                ]
+            )[:10]
+
+            selected_species_names = {d.name for d in species_dirs}
+            print(f"[Subset] Selected species: {sorted(selected_species_names)}")
+        else:
+            # use all species, even those with numeric folder names
+            species_dirs = sorted([d for d in input_path.iterdir() if d.is_dir()])
+
+        # gather audio files only from the selected species
+        audio_files = sorted([p for d in species_dirs for p in d.rglob("*.ogg")])
+        # partition the audio files
         audio_files_subset = [
             p for i, p in enumerate(audio_files) if i % self.num_partitions == self.part
         ]
 
-        if self.use_subset:
-            print(
-                f"[Subset] Processing only {len(audio_files_subset)} files in partition {self.part}"
-            )
-            audio_files_subset = audio_files_subset[: self.subset_size]
-
         if not audio_files_subset:
             print(f"No files found for partition {self.part}. Skipping.")
+            return  # skip if no files are found
 
-        # for target in self.output().values():
-        #     target.makedirs()
         for key in ["embed", "predict", "timing"]:
             Path(self.output()[key].path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -107,11 +115,8 @@ class ProcessPartition(luigi.Task, OptionsMixin):
 class ProcessAudio(luigi.Task, OptionsMixin):
     def requires(self):
         """Define dependencies: one ProcessPartition task for each partition."""
-        if self.use_subset:
-            parts_to_process = [0]
-        else:
-            limit = self.limit if self.limit > 0 else self.num_partitions
-            parts_to_process = range(limit)
+        limit = self.limit if self.limit > 0 else self.num_partitions
+        parts_to_process = range(limit)
 
         for part in parts_to_process:
             yield ProcessPartition(
@@ -121,7 +126,6 @@ class ProcessAudio(luigi.Task, OptionsMixin):
                 clip_step=self.clip_step,
                 num_partitions=self.num_partitions,
                 use_subset=self.use_subset,
-                subset_size=self.subset_size,
                 part=part,
             )
 
@@ -151,7 +155,6 @@ def process_audio(
     model_name: str = "BirdNET",
     num_partitions: int = 200,
     use_subset: bool = False,
-    subset_size: int = 5,
     limit: int = -1,
     num_workers: int = 1,
     assert_gpu: bool = False,
@@ -171,7 +174,6 @@ def process_audio(
                 clip_step=clip_step,
                 num_partitions=num_partitions,
                 use_subset=use_subset,
-                subset_size=subset_size,
                 limit=limit,
             )
         ],

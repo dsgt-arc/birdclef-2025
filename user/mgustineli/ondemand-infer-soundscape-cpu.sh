@@ -30,7 +30,6 @@ python -m birdclef.infer.workflow process-audio \
     $scratch_dir/data/2025/subset-${dataset_name}-infer-soundscape-cpu \
     --model-name $model_name \
     --use-subset \
-    --subset-size 5 \
     --num-workers ${NUM_WORKERS:-24} \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi) \
     # $(if [ "${USE_SUBSET:-false}" = "true" ]; then echo "--use-subset"; fi) \
