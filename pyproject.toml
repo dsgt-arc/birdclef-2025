@@ -41,6 +41,7 @@ dependencies = [
     "ai-edge-litert>=1.2.0",
     "fast-hdbscan>=0.2.2",
     "xgboost>=2.1.4",
+    "scikit-optimize>=0.10.2",
 ]
 
 [project.optional-dependencies]
