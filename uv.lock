@@ -422,6 +422,7 @@ dependencies = [
     { name = "ai-edge-litert" },
     { name = "bioacoustics-model-zoo" },
     { name = "contexttimer" },
+    { name = "fast-hdbscan" },
     { name = "ffmpeg-python" },
     { name = "librosa" },
     { name = "lightning" },
@@ -471,6 +472,7 @@ requires-dist = [
     { name = "ai-edge-litert", specifier = ">=1.2.0" },
     { name = "bioacoustics-model-zoo", git = "https://github.com/kitzeslab/bioacoustics-model-zoo" },
     { name = "contexttimer" },
+    { name = "fast-hdbscan", specifier = ">=0.2.2" },
     { name = "ffmpeg-python" },
     { name = "jupyterlab", marker = "extra == 'dev'" },
     { name = "librosa" },
@@ -1059,6 +1061,21 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/91/50/a9d80c47ff289c611ff12e63f7c5d13942c65d68125160cefd768c73e6e4/executing-2.2.0.tar.gz", hash = "sha256:5d108c028108fe2551d1a7b2e8b713341e2cb4fc0aa7dcf966fa4327a5226755", size = 978693, upload-time = "2025-01-22T15:41:29.403Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/8f/c4d9bafc34ad7ad5d8dc16dd1347ee0e507a52c3adb6bfa8887e1c6a26ba/executing-2.2.0-py2.py3-none-any.whl", hash = "sha256:11387150cad388d62750327a53d3339fad4888b39a6fe233c3afbb54ecffd3aa", size = 26702, upload-time = "2025-01-22T15:41:25.929Z" },
+]
+
+[[package]]
+name = "fast-hdbscan"
+version = "0.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numba", version = "0.60.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.10'" },
+    { name = "numba", version = "0.61.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.10'" },
+    { name = "numpy" },
+    { name = "scikit-learn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6b/0c/aacf8d537077168616e8e6a4c59509f16e7db51561fe60db677ed8aad0e5/fast_hdbscan-0.2.2.tar.gz", hash = "sha256:ebfda208c85d338141cc6c8a6b95c9f2f1ea83d3b9982f9864b25d73b07d9cc8", size = 25864 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/96/cc624892d63e13651c99c2017dc69bf8343b50bde09898b41ff284b71aea/fast_hdbscan-0.2.2-py3-none-any.whl", hash = "sha256:2b75144a5c9c6ec46d444f1bf3d122512efaf88c1f7776dabfb6f2ca405dca79", size = 27370 },
 ]
 
 [[package]]
