@@ -40,6 +40,7 @@ dependencies = [
     "tensorrt",
     "ai-edge-litert>=1.2.0",
     "fast-hdbscan>=0.2.2",
+    "xgboost>=2.1.4",
 ]
 
 [project.optional-dependencies]
