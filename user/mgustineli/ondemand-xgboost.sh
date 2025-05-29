@@ -25,9 +25,9 @@ model_name=${1:-"Perch"}
 # - BirdSetEfficientNetB1
 # - RanaSierraeCNN
 search_method=${2:-"random"}  # grid, random, or bayesian
-pickle_name=xgboost-model.pkl
+pickle_name=xgboost-model-${search_method}-v1.pkl
 
-python -m birdclef.classifier.xgboost main \
-    $scratch_dir/data/2025/subset-${dataset_name}-infer-soundscape-cpu \
-    $scratch_dir/models/2025/subset-${dataset_name}-infer-soundscape-cpu/$pickle_name \
+python -m birdclef.classifier.xgboost \
+    $scratch_dir/data/2025/subset-${dataset_name}-infer-soundscape-cpu/$model_name/parts/embed/ \
+    $scratch_dir/models/2025/subset-${dataset_name}-infer-soundscape-cpu/$model_name/$pickle_name \
     --search-method $search_method \

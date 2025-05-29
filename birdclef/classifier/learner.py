@@ -58,7 +58,7 @@ class Learner:
             n_jobs=-1,
         )
         # fit the model
-        self.clf.fit(X_train, y_train, sample_weight=weights)
+        self.clf.fit(X_train, y_train, **{"model__sample_weight": weights})
         self.search_name = str(self.clf.__class__.__name__)
 
     def get_scores(self, X_train, X_test, y_train, y_test, average=None):
@@ -111,26 +111,31 @@ class Learner:
         }
 
     # evaluate Learner class
-    def evaluate_learner(self):
+    def evaluate_learner(self, file_path: str = None):
         """
-        Print model scores
+        Print model scores to console and optionally write to a .txt file.
         """
-        print(f"{'#################################' * 2}")
-        print(f"{self.search_name}:\t  {self.name}")
-        print(f"Train score:     {round(self.scores['train_score'], 3)}")
-        print(f"Test score:      {round(self.scores['test_score'], 3)}")
-        print(f"Accuracy score:  {round(self.scores['accuracy'], 3)}")
-        print(f"Precision score: {round(self.scores['precision'], 3)}")
-        print(f"Recall score:    {round(self.scores['recall'], 3)}")
-        print(f"F1 score:        {round(self.scores['f1'], 3)}")
-        print(f"Wall Clock Fit:  {round(self.scores['wall_clock_fit'], 3)}")
-        print(f"Wall Clock Pred: {round(self.scores['wall_clock_pred'], 3)}")
-        # classification report
-        print(f"\nClassification report:\n{self.class_report}")
-
-        # best score and best params
-        print(f"Best score: {round(self.clf.best_score_, 3)}")
-        print("Best params:")
+        lines = []
+        lines.append(f"{'#################################' * 2}")
+        lines.append(f"{self.search_name}:\t  {self.name}")
+        lines.append(f"Train score:     {round(self.scores['train_score'], 3)}")
+        lines.append(f"Test score:      {round(self.scores['test_score'], 3)}")
+        lines.append(f"Accuracy score:  {round(self.scores['accuracy'], 3)}")
+        lines.append(f"Precision score: {round(self.scores['precision'], 3)}")
+        lines.append(f"Recall score:    {round(self.scores['recall'], 3)}")
+        lines.append(f"F1 score:        {round(self.scores['f1'], 3)}")
+        lines.append(f"Wall Clock Fit:  {round(self.scores['wall_clock_fit'], 3)}")
+        lines.append(f"Wall Clock Pred: {round(self.scores['wall_clock_pred'], 3)}")
+        lines.append(f"\nClassification report:\n{self.class_report}")
+        lines.append(f"Best score: {round(self.clf.best_score_, 3)}")
+        lines.append("Best params:")
         for param in self.clf.best_params_.items():
-            print(f"\t{param}")
-        print()
+            lines.append(f"\t{param}")
+        lines.append("")
+
+        report_str = "\n".join(lines)
+        print(report_str)
+
+        if file_path:
+            with open(file_path, "w") as f:
+                f.write(report_str)

@@ -1,3 +1,4 @@
+import os
 import typer
 import pickle
 import numpy as np
@@ -5,7 +6,6 @@ import pandas as pd
 
 from .learner import Learner
 from xgboost import XGBClassifier
-from typing_extensions import Annotated
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split, RandomizedSearchCV, GridSearchCV
@@ -24,6 +24,15 @@ def get_param_grid():
         # "model__subsample": np.linspace(0.5, 1.0, 6),
         # "model__colsample_bytree": np.linspace(0.5, 1.0, 6),
     }
+
+
+def get_search_func(search_method: str):
+    if search_method == "grid":
+        return GridSearchCV
+    elif search_method == "bayesian":
+        return BayesSearchCV
+    elif search_method == "random":
+        return RandomizedSearchCV
 
 
 def preprocess_data(input_path: str) -> pd.DataFrame:
@@ -83,29 +92,23 @@ def train_model(
 
     # init learners
     xgb = Learner(pipe=xgb_pipe, params=xgb_param_grid)
+
+    # search method
+    search_func = get_search_func(search_method)
+
     # fit model
-    if search_method == "grid":
-        search_func = GridSearchCV()
-    elif search_method == "bayesian":
-        search_func = BayesSearchCV(
-            n_iter=10,
-            scoring="f1",
-            verbose=4,
-            cv=3,
-            n_points=1,
-            n_jobs=-1,
-        )
-    elif search_method == "random":
-        search_func = RandomizedSearchCV()
-    xgb.fit_gridsearch(search_func, X_train, y_train_enc, verbose=2)
+    xgb.fit_gridsearch(search_func, X_train, y_train_enc, verbose=3)
+
     # get model scores
     xgb.get_scores(X_train, X_test, y_train_enc, y_test_enc, average="macro")
-    # print scores
-    xgb.evaluate_learner()
+
     return xgb
 
 
 def save_model(model: Learner, output_path: str):
+    # crete output directory if it doesn't exist
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
     # save model
     with open(output_path, "wb") as f:
         pickle.dump(model.clf.best_estimator_, f)
@@ -114,15 +117,9 @@ def save_model(model: Learner, output_path: str):
 
 @app.command()
 def main(
-    input_path: Annotated[str, typer.Argument(help="Input root directory")],
-    output_path: Annotated[str, typer.Argument(help="Output root directory")],
-    search_method: Annotated[
-        str,
-        typer.Option(
-            help="Search method for hyperparameter tuning ('grid', 'random', 'bayesian')",
-            default="random",
-        ),
-    ],
+    input_path: str,
+    output_path: str,
+    search_method: str = "random",
 ):
     # preprocess data
     df_embs = preprocess_data(input_path)
@@ -135,6 +132,11 @@ def main(
 
     # save model
     save_model(xgb, output_path)
+
+    # evaluate and save learner report
+    report_path = output_path.replace(".pkl", "_report.txt")
+    xgb.evaluate_learner(file_path=report_path)
+
     print("Training completed successfully!")
 
 
