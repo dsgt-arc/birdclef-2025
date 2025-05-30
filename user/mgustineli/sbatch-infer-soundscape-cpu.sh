@@ -1,4 +1,7 @@
 #!/bin/bash
+#SBATCH --job-name=infer --account=paceship-dsgt_clef2025
+#SBATCH -N1 -n1 --cpus-per-task=24 --mem-per-cpu=8G
+#SBATCH -t240 -qinferno -oReport-%j.out
 set -xe
 
 # print system info
