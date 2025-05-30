@@ -14,7 +14,7 @@ cd ~/scratch/birdclef/models
 
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
-dataset_name=train_audio
+dataset_name=train_audio-infer-soundscape
 model_name=${1:-"Perch"}
 # model names:
 # - BirdNET
@@ -28,6 +28,6 @@ search_method=${2:-"random"}  # grid, random, or bayesian
 pickle_name=xgboost-model-${search_method}-v1.pkl
 
 python -m birdclef.classifier.xgboost \
-    $scratch_dir/data/2025/subset-${dataset_name}-infer-soundscape-cpu/$model_name/parts/embed/ \
-    $scratch_dir/models/2025/subset-${dataset_name}-infer-soundscape-cpu/$model_name/$pickle_name \
+    $scratch_dir/data/2025/$dataset_name/$model_name/parts/embed/ \
+    $scratch_dir/models/2025/$dataset_name/$model_name/$pickle_name \
     --search-method $search_method \

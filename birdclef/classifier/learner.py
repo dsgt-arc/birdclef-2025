@@ -55,7 +55,7 @@ class Learner:
             refit="f1",
             cv=self.cv,
             verbose=verbose,
-            n_jobs=-1,
+            n_jobs=1,
         )
         # fit the model
         self.clf.fit(X_train, y_train, **{"model__sample_weight": weights})

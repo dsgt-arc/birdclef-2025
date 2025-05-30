@@ -41,9 +41,15 @@ def preprocess_data(input_path: str) -> pd.DataFrame:
     df["species_name"] = df["file"].apply(
         lambda x: x.split("train_audio/")[1].split("/")[0]
     )
+    # train/test split requries y label to have at least 2 samples
+    # remove species with less than 2 samples
+    species_count = df["species_name"].value_counts()
+    valid_species = species_count[species_count >= 2].index
+    filtered_df = df[df["species_name"].isin(valid_species)].reset_index(drop=True)
+    # concatenate embeddings
     embed_cols = list(map(str, range(1280)))
-    df["embeddings"] = df[embed_cols].values.tolist()
-    df_embs = df[["species_name", "embeddings"]].copy()
+    filtered_df["embeddings"] = filtered_df[embed_cols].values.tolist()
+    df_embs = filtered_df[["species_name", "embeddings"]].copy()
     print(f"DataFrame shape: {df_embs.shape}")
     print(f"Embedding size: {len(df_embs['embeddings'].iloc[0])}")
     return df_embs
@@ -84,7 +90,7 @@ def train_model(
     xgb_pipe = Pipeline(
         steps=[
             ("scaler", StandardScaler()),
-            ("model", XGBClassifier(seed=42)),
+            ("model", XGBClassifier(seed=42, n_jobs=1)),
         ]
     )
     # GridSearchCV params
