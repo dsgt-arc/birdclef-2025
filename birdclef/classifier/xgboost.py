@@ -49,6 +49,8 @@ def preprocess_data(input_path: str) -> pd.DataFrame:
     # concatenate embeddings
     embed_cols = list(map(str, range(1280)))
     filtered_df["embeddings"] = filtered_df[embed_cols].values.tolist()
+    # downsample for debugging
+    # filtered_df = filtered_df.sample(frac=0.1, random_state=42).reset_index(drop=True)
     df_embs = filtered_df[["species_name", "embeddings"]].copy()
     print(f"DataFrame shape: {df_embs.shape}")
     print(f"Embedding size: {len(df_embs['embeddings'].iloc[0])}")
@@ -90,7 +92,15 @@ def train_model(
     xgb_pipe = Pipeline(
         steps=[
             ("scaler", StandardScaler()),
-            ("model", XGBClassifier(seed=42, n_jobs=1)),
+            (
+                "model",
+                XGBClassifier(
+                    seed=42,
+                    n_jobs=1,
+                    tree_method="gpu_hist",  # GPU-accelerated training
+                    predictor="gpu_predictor",  # GPU-accelerated prediction
+                ),
+            ),
         ]
     )
     # GridSearchCV params

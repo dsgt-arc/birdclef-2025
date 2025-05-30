@@ -42,21 +42,23 @@ class Learner:
         # estimate class weights for unbalanced datasets
         weights = class_weight.compute_sample_weight(class_weight="balanced", y=y_train)
 
-        # train learner
-        self.clf = search_func(
-            self.pipe,
-            self.params,
-            scoring={
+        search_kwargs = {
+            "scoring": {
                 "accuracy": make_scorer(accuracy_score),
                 "precision": make_scorer(precision_score, average=self.average),
                 "recall": make_scorer(recall_score, average=self.average),
                 "f1": make_scorer(f1_score, average=self.average),
             },
-            refit="f1",
-            cv=self.cv,
-            verbose=verbose,
-            n_jobs=1,
-        )
+            "refit": "f1",
+            "cv": self.cv,
+            "verbose": verbose,
+            "n_jobs": 1,
+        }
+        if search_func.__name__ == "RandomizedSearchCV":
+            search_kwargs["n_iter"] = 5
+
+        # train learner
+        self.clf = search_func(self.pipe, self.params, **search_kwargs)
         # fit the model
         self.clf.fit(X_train, y_train, **{"model__sample_weight": weights})
         self.search_name = str(self.clf.__class__.__name__)
