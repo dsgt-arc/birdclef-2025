@@ -14,7 +14,7 @@ cd ~/scratch/birdclef/models
 
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
-dataset_name=train_audio
+dataset_name=subset-train_audio-infer-soundscape-cpu
 model_name=${1:-"Perch"}
 # model names:
 # - BirdNET
@@ -24,12 +24,10 @@ model_name=${1:-"Perch"}
 # - BirdSetConvNeXT
 # - BirdSetEfficientNetB1
 # - RanaSierraeCNN
+search_method=${2:-"random"}  # grid, random, or bayesian
+pickle_name=xgboost-model-${search_method}-v1.pkl
 
-python -m birdclef.infer.workflow process-audio \
-    $project_dir/raw/birdclef-2025/$dataset_name \
-    $scratch_dir/data/2025/${dataset_name}-infer-soundscape \
-    --model-name $model_name \
-    --num-workers ${NUM_WORKERS:-24} \
-    $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi) \
-    # $(if [ "${USE_SUBSET:-false}" = "true" ]; then echo "--use-subset"; fi) \
-    # $(if [ -n "${SUBSET_SIZE:-}" ]; then echo "--subset-size $SUBSET_SIZE"; fi)
+python -m birdclef.classifier.xgboost \
+    $scratch_dir/data/2025/$dataset_name/$model_name/parts/embed/ \
+    $scratch_dir/models/2025/$dataset_name/$model_name/$pickle_name \
+    --search-method $search_method \
