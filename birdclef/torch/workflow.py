@@ -1,4 +1,5 @@
 import os
+import json
 import typer
 import numpy as np
 import pandas as pd
@@ -8,6 +9,9 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from .data import BirdDataModule
 from .model import LinearClassifier
+import pytorch_lightning as pl
+
+pl.seed_everything(42, workers=True)  # for reproducibility
 
 app = typer.Typer()
 
@@ -50,10 +54,26 @@ def perform_train_test_split(
     return X_train, X_test, y_train, y_test
 
 
+def label_index_mapping(df: pd.DataFrame, output_path: str) -> tuple:
+    # create label index mapping
+    unique_labels = sorted(df["species_name"].unique())
+    label_to_idx = {label: i for i, label in enumerate(unique_labels)}
+
+    # save label mapping to disk
+    label_map_path = f"{output_path}/label_to_idx.json"
+    os.makedirs(os.path.dirname(label_map_path), exist_ok=True)
+    with open(label_map_path, "w") as f:
+        json.dump(label_to_idx, f)
+
+    return label_to_idx
+
+
 @app.command()
 def main(
     input_path: str,
     output_path: str,
+    model_name: str,  # Perch, BirdNET, etc.
+    learning_rate: float = typer.Option(1e-3, help="Learning rate for the optimizer"),
 ):
     # load and preprocess data
     df = load_preprocess_data(input_path)
@@ -62,23 +82,25 @@ def main(
     X_train, X_test, y_train, y_test = perform_train_test_split(df)
 
     # create label index mapping
-    unique_labels = sorted(df["species_name"].unique())
-    label_to_idx = {label: i for i, label in enumerate(unique_labels)}
+    label_to_idx = label_index_mapping(df, output_path)
     num_classes = len(label_to_idx)
 
     # instantiate DataModule
     data_module = BirdDataModule(X_train, X_test, y_train, y_test, label_to_idx)
 
     # instantiate model
-    model = LinearClassifier(input_dim=1280, num_classes=num_classes)
+    input_dim = X_train.shape[1]
+    model = LinearClassifier(
+        input_dim=input_dim, num_classes=num_classes, lr=learning_rate
+    )
 
     # logger and callbacks
     logger = TensorBoardLogger("tb_logs", name="linear_classifier")
 
     checkpoint_cb = ModelCheckpoint(
         monitor="val_loss",
-        dirpath="~/p-dsgt_clef2025-0/shared/birdclef/checkpoints",
-        filename="best-checkpoint",
+        dirpath=f"{output_path}/checkpoints",
+        filename=f"best-checkpoint-{model_name}-{{epoch:02d}}-{{val_loss:.2f}}",
         save_top_k=1,
         mode="min",
     )
@@ -96,10 +118,10 @@ def main(
     # fit model
     trainer.fit(model, datamodule=data_module)
 
-    # evaluate and save learner report
-    report_path = output_path.replace(".pkl", "_report.txt")
-
-    print("Training completed successfully!")
+    # validate results
+    val_results = trainer.validate(model, datamodule=data_module)
+    print("Validation Results:", val_results)
+    print(f"Model saved to {output_path}/checkpoints")
 
 
 if __name__ == "__main__":

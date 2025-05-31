@@ -7,7 +7,7 @@ import typer
 from contexttimer import Timer
 from rich import print
 from birdclef import is_gpu_enabled
-from .model_config import model_config
+from birdclef.model_config import model_config
 
 app = typer.Typer()
 
