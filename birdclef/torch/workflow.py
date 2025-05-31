@@ -74,6 +74,7 @@ def main(
     output_path: str,
     model_name: str,  # Perch, BirdNET, etc.
     learning_rate: float = typer.Option(1e-3, help="Learning rate for the optimizer"),
+    batch_size: int = typer.Option(64, help="Batch size for training and validation"),
 ):
     # load and preprocess data
     df = load_preprocess_data(input_path)
@@ -86,7 +87,9 @@ def main(
     num_classes = len(label_to_idx)
 
     # instantiate DataModule
-    data_module = BirdDataModule(X_train, X_test, y_train, y_test, label_to_idx)
+    data_module = BirdDataModule(
+        X_train, X_test, y_train, y_test, label_to_idx, batch_size=batch_size
+    )
 
     # instantiate model
     input_dim = X_train.shape[1]

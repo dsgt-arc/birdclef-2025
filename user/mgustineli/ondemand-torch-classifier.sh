@@ -14,7 +14,7 @@ cd ~/scratch/birdclef/models
 
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
-dataset_name=subset-train_audio-infer-soundscape-cpu
+dataset_name=train_audio-infer-soundscape
 model_name=${1:-"Perch"}
 # model names:
 # - BirdNET
