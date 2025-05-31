@@ -30,7 +30,6 @@ def load_preprocess_data(input_path: str) -> pd.DataFrame:
     # concatenate embeddings
     embed_cols = list(map(str, range(1280)))
     filtered_df["embeddings"] = filtered_df[embed_cols].values.tolist()
-    # downsample for debugging
     df_embs = filtered_df[["species_name", "embeddings"]].copy()
     print(f"DataFrame shape: {df_embs.shape}")
     print(f"Embedding size: {len(df_embs['embeddings'].iloc[0])}")
