@@ -28,8 +28,9 @@ def load_preprocess_data(input_path: str) -> pd.DataFrame:
     valid_species = species_count[species_count >= 2].index
     filtered_df = df[df["species_name"].isin(valid_species)].reset_index(drop=True)
     # concatenate embeddings
-    embed_cols = list(map(str, range(1280)))
-    filtered_df["embeddings"] = filtered_df[embed_cols].values.tolist()
+    non_embed_cols = {"file", "start_time", "end_time", "species_name"}
+    embed_cols = [col for col in filtered_df.columns if col not in non_embed_cols]
+    filtered_df["embeddings"] = list(filtered_df[embed_cols].to_numpy())
     df_embs = filtered_df[["species_name", "embeddings"]].copy()
     print(f"DataFrame shape: {df_embs.shape}")
     print(f"Embedding size: {len(df_embs['embeddings'].iloc[0])}")
