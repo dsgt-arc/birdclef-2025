@@ -15,7 +15,7 @@ cd ~/scratch/birdclef/models
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 dataset_name=train_audio
-model_name=${1:-"BirdNET"}
+model_name=${1:-"HawkEars"}
 # model names:
 # - BirdNET
 # - YAMNet

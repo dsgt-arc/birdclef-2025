@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=birdsetefficientnetb1-infer         # Job name
+#SBATCH --job-name=ranasierraecnn-infer         # Job name
 #SBATCH --account=paceship-dsgt_clef2025        # charge account
 #SBATCH --nodes=1                               # Number of nodes
 #SBATCH --gres=gpu:1                            # GPU resource
@@ -27,7 +27,7 @@ cd ~/scratch/birdclef/models
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 dataset_name=train_audio
-model_name=${1:-"BirdSetEfficientNetB1"}
+model_name=${1:-"RanaSierraeCNN"}
 # model names:
 # - BirdNET
 # - YAMNet
@@ -37,11 +37,18 @@ model_name=${1:-"BirdSetEfficientNetB1"}
 # - BirdSetEfficientNetB1
 # - RanaSierraeCNN
 
+# prevent libgomp and related libraries from spawning too many threads
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+
 python -m birdclef.infer.workflow process-audio \
     $project_dir/raw/birdclef-2025/$dataset_name \
     $scratch_dir/data/2025/${dataset_name}-infer-soundscape \
     --model-name $model_name \
-    --num-workers ${NUM_WORKERS:-24} \
+    --num-workers ${NUM_WORKERS:-6} \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi) \
     # $(if [ "${USE_SUBSET:-false}" = "true" ]; then echo "--use-subset"; fi) \
     # $(if [ -n "${SUBSET_SIZE:-}" ]; then echo "--subset-size $SUBSET_SIZE"; fi)
