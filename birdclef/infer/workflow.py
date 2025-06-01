@@ -6,7 +6,7 @@ import luigi
 import typer
 from contexttimer import Timer
 from rich import print
-from birdclef import is_gpu_enabled
+from birdclef.gpu import is_gpu_enabled
 from birdclef.model_config import model_config
 
 app = typer.Typer()
@@ -165,6 +165,9 @@ def process_audio(
             "GPU is not enabled. Please check your PyTorch or TensorFlow installation."
         )
     clip_step = model_config[model_name]["clip_step"]
+    # adjust clip_step for specific models
+    if clip_step == 3.0 or clip_step == 2.0:
+        clip_step = 1.0  # use 1.0s clip step for BirdNET, HawkEars, and RanaSierraeCNN
     luigi.build(
         [
             ProcessAudio(
