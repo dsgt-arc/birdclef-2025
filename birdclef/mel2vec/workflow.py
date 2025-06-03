@@ -5,7 +5,8 @@ import numpy as np
 import polars as pl
 from pathlib import Path
 from .callback import TqdmCallback
-from gensim.models import Word2Vec
+from gensim.models import Word2Vec, KeyedVectors
+from functools import cache
 
 app = typer.Typer()
 
@@ -105,7 +106,7 @@ class BuildPCATokenizer(BuildTokenizer):
         self._save_pca(pca)
 
 
-class Word2VecTask(luigi.Task, OptionsMixin):
+class Word2VecOptionsMixin(OptionsMixin):
     vector_size = luigi.IntParameter(default=256)
     window = luigi.IntParameter(default=40)
     ns_exponent = luigi.FloatParameter(default=0.75)
@@ -118,6 +119,8 @@ class Word2VecTask(luigi.Task, OptionsMixin):
         description="The tokenizer to use for training the Word2Vec model",
     )
 
+
+class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
     def requires(self):
         return {
             "tokenizer": BuildTokenizer(
@@ -201,6 +204,113 @@ class Word2VecTask(luigi.Task, OptionsMixin):
         model.wv.save(self.output()["wordvectors"].path)
 
 
+class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
+    """Task to embed audio files using the trained Word2Vec model."""
+
+    def output(self):
+        prefix = "/".join(
+            f"{k}={v}"
+            for k, v in [
+                ("tokenizer", self.tokenizer),
+                ("vector_size", self.vector_size),
+                ("window", self.window),
+                ("ns_exponent", self.ns_exponent),
+                ("sample", self.sample),
+                ("epochs", self.epochs),
+            ]
+        )
+        return luigi.LocalTarget(f"{self.output_root}/embedding/{prefix}")
+
+    def requires(self):
+        word2vec = Word2VecTask(
+            input_root=self.input_root,
+            output_root=self.output_root,
+            epochs=self.epochs,
+            vector_size=self.vector_size,
+            window=self.window,
+            ns_exponent=self.ns_exponent,
+            sample=self.sample,
+            workers=self.workers,
+            tokenizer=self.tokenizer,
+        )
+        return {
+            "word2vec": word2vec,
+            "tokenizer": word2vec.requires(),
+        }
+
+    @cache
+    def get_index(self):
+        """Get the FAISS index for the centroids."""
+        centroids = np.load(self.requires()["tokenizer"].output()["centroids"].path)
+        index = faiss.IndexFlatL2(centroids.shape[1])
+        index.add(centroids)
+        return index
+
+    @cache
+    def get_word_vectors(self):
+        """Get the word vectors from the Word2Vec model."""
+        word_vectors = KeyedVectors.load(
+            self.requires()["word2vec"].output()["wordvectors"].path,
+            mmap="r",
+        )
+        return word_vectors
+
+    def get_start_time(self, timestamp, interval=5) -> int:
+        # up to but not including the value
+        for i in range(0, 100, interval):
+            if i <= timestamp < i + interval:
+                return i
+        return -1
+
+    def mfcc_to_wv(self, mfcc: list) -> list:
+        # convert mfcc to word vectors
+        X = np.array(mfcc).reshape(1, -1)
+        _, indices = self.get_index().search(X, 1)  # get the closest centroid
+        return self.get_word_vectors()[indices[0][0]].tolist()
+
+    def aggregate_mfcc(self, group: pl.DataFrame) -> pl.DataFrame:
+        X_mfcc = np.stack(group.get_column("mfcc").to_numpy())
+        X_w2v = np.stack(group.get_column("word_vector").to_numpy())
+        return pl.DataFrame(
+            {
+                "file": group.get_column("file").to_numpy()[0],
+                "start_time": group.get_column("start_time").to_numpy()[0],
+                "mfcc_stats": [
+                    X_mfcc.mean(axis=0).tolist() + X_mfcc.std(axis=0).tolist()
+                ],
+                "word_vector": [X_w2v.mean(axis=0).tolist()],
+            }
+        )
+
+    def run(self):
+        mfcc = pl.scan_parquet(self.input_root).with_columns(
+            pl.col("timestamp")
+            .map_elements(self.get_start_time, return_dtype=pl.Int64)
+            .alias("start_time")
+        )
+        processed = (
+            mfcc.with_columns(
+                pl.col("mfcc")
+                .map_elements(self.mfcc_to_wv, return_dtype=pl.List(pl.Float64))
+                .alias("word_vector")
+            )
+            .group_by("file", "start_time")
+            .map_groups(
+                self.aggregate_mfcc,
+                schema=pl.Schema(
+                    {
+                        "file": pl.Utf8,
+                        "start_time": pl.Int64,
+                        "mfcc_stats": pl.List(pl.Float64),
+                        "word_vector": pl.List(pl.Float64),
+                    }
+                ),
+            )
+            .sort("file", "start_time")
+        )
+        processed.sink_parquet(self.output().path, compression="zstd")
+
+
 @app.command()
 def run(
     input_root: str, output_root: str, gensim_workers: int = 8, luigi_workers: int = 8
@@ -208,7 +318,7 @@ def run(
     """Run the tokenizer building process."""
     luigi.build(
         [
-            Word2VecTask(
+            EmbedWord2VecTask(
                 input_root=input_root,
                 output_root=output_root,
                 epochs=100,
