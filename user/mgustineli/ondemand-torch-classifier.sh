@@ -15,7 +15,7 @@ cd ~/scratch/birdclef/models
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 dataset_name=train_audio-infer-soundscape
-model_name=${1:-"Perch"}
+model_name=${1:-"RanaSierraeCNN"}
 # model names:
 # - BirdNET
 # - YAMNet
@@ -27,6 +27,7 @@ model_name=${1:-"Perch"}
 classifier_name=torch-linear-v1
 
 python -m birdclef.torch.workflow \
-    $scratch_dir/data/2025/$dataset_name/$model_name/parts/embed/ \
-    $scratch_dir/models/2025/$dataset_name/$model_name/$classifier_name \
+    $project_dir/data/2025/$dataset_name/$model_name/parts/embed/ \
+    $project_dir/models/2025/$dataset_name/$model_name/$classifier_name \
     $model_name \
+    --batch-size ${BATCH_SIZE:-64} \
