@@ -7,6 +7,8 @@ from pathlib import Path
 from .callback import TqdmCallback
 from gensim.models import Word2Vec, KeyedVectors
 from functools import cache
+from birdclef.spark import get_spark
+from pyspark.sql import functions as F
 
 app = typer.Typer()
 
@@ -250,65 +252,61 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
     def get_word_vectors(self):
         """Get the word vectors from the Word2Vec model."""
         word_vectors = KeyedVectors.load(
-            self.requires()["word2vec"].output()["wordvectors"].path,
-            mmap="r",
+            self.requires()["word2vec"].output()["wordvectors"].path
         )
         return word_vectors
 
-    def get_start_time(self, timestamp, interval=5) -> int:
-        # up to but not including the value
-        for i in range(0, 100, interval):
-            if i <= timestamp < i + interval:
-                return i
-        return -1
-
-    def mfcc_to_wv(self, mfcc: list) -> list:
-        # convert mfcc to word vectors
-        X = np.array(mfcc).reshape(1, -1)
-        _, indices = self.get_index().search(X, 1)  # get the closest centroid
-        return self.get_word_vectors()[indices[0][0]].tolist()
-
-    def aggregate_mfcc(self, group: pl.DataFrame) -> pl.DataFrame:
-        X_mfcc = np.stack(group.get_column("mfcc").to_numpy())
-        X_w2v = np.stack(group.get_column("word_vector").to_numpy())
-        return pl.DataFrame(
-            {
-                "file": group.get_column("file").to_numpy()[0],
-                "start_time": group.get_column("start_time").to_numpy()[0],
-                "mfcc_stats": [
-                    X_mfcc.mean(axis=0).tolist() + X_mfcc.std(axis=0).tolist()
-                ],
-                "word_vector": [X_w2v.mean(axis=0).tolist()],
-            }
-        )
-
     def run(self):
-        mfcc = pl.scan_parquet(self.input_root).with_columns(
-            pl.col("timestamp")
-            .map_elements(self.get_start_time, return_dtype=pl.Int64)
-            .alias("start_time")
-        )
-        processed = (
-            mfcc.with_columns(
-                pl.col("mfcc")
-                .map_elements(self.mfcc_to_wv, return_dtype=pl.List(pl.Float64))
-                .alias("word_vector")
+        with get_spark() as spark:
+
+            @F.udf(returnType="integer")
+            def get_start_time(timestamp, interval=5) -> int:
+                # up to but not including the value
+                for i in range(0, 100, interval):
+                    if i <= timestamp < i + interval:
+                        return i
+                return -1
+
+            index = self.get_index()
+            word_vectors = self.get_word_vectors()
+
+            @F.udf(returnType="array<float>")
+            def mfcc_to_wv(mfcc: list) -> list:
+                # convert mfcc to word vectors
+                X = np.array(mfcc).reshape(1, -1)
+                if self.tokenizer == "tokenizer_pca":
+                    # unfortunately we can't serialize PCA so reread it from disk every time,
+                    pca = faiss.read_VectorTransform(
+                        self.requires()["tokenizer"].output()["pca"].path
+                    )
+                    X = pca.apply(X)
+                _, indices = index.search(X, 1)
+                return word_vectors[indices[0][0]].tolist()
+
+            @F.udf(returnType="array<float>")
+            def get_mfcc_stats(mfcc: list) -> list:
+                X = np.stack(mfcc)
+                return X.mean(axis=0).tolist() + X.std(axis=0).tolist()
+
+            @F.udf(returnType="array<float>")
+            def avg_vector(vectors: list) -> list:
+                return np.mean(np.array(vectors), axis=0).tolist()
+
+            (
+                spark.read.parquet(self.input_root)
+                .withColumn("start_time", get_start_time(F.col("timestamp")))
+                .withColumn("word_vector", mfcc_to_wv(F.col("mfcc")))
+                .groupBy("file", "start_time")
+                .agg(
+                    F.collect_list("mfcc").alias("mfcc"),
+                    F.collect_list("word_vector").alias("word_vector"),
+                )
+                .withColumn("mfcc_stats", get_mfcc_stats(F.col("mfcc")))
+                .withColumn("word_vector", avg_vector(F.col("word_vector")))
+                .select("file", "start_time", "mfcc_stats", "word_vector")
+                .repartition(20)
+                .write.parquet(self.output().path, mode="overwrite"),
             )
-            .group_by("file", "start_time")
-            .map_groups(
-                self.aggregate_mfcc,
-                schema=pl.Schema(
-                    {
-                        "file": pl.Utf8,
-                        "start_time": pl.Int64,
-                        "mfcc_stats": pl.List(pl.Float64),
-                        "word_vector": pl.List(pl.Float64),
-                    }
-                ),
-            )
-            .sort("file", "start_time")
-        )
-        processed.sink_parquet(self.output().path, compression="zstd")
 
 
 @app.command()
