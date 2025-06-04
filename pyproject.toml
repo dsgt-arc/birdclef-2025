@@ -43,6 +43,8 @@ dependencies = [
     "xgboost>=2.1.4",
     "scikit-optimize>=0.10.2",
     "polars>=1.30.0",
+    "faiss-cpu>=1.11.0",
+    "gensim>=4.3.3",
 ]
 
 [project.optional-dependencies]
