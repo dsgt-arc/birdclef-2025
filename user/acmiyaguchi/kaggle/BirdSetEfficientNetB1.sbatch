@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=birdclef-perch --account=paceship-dsgt_clef2025 --qos=inferno
+#SBATCH --job-name=birdclef-efficientnet --account=paceship-dsgt_clef2025 --qos=inferno
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=24 --mem-per-cpu=6G
-#SBATCH --time=04:00:00 --output=logs/Report-perch-%j.log
+#SBATCH --time=04:00:00 --output=logs/Report-efficientnet-%j.log
 
 set -eu
 
@@ -16,5 +16,5 @@ scratch_dir=$(realpath ~/scratch/birdclef)
 python -m birdclef.kaggle.main \
     $scratch_dir/test_soundscape \
     $scratch_dir/tmp/output \
-    $project_dir/models/2025/v1/Perch/torch-linear-v1 \
-    Perch
+    $project_dir/models/2025/v1/BirdSetEfficientNetB1/torch-linear-v1 \
+    BirdSetEfficientNetB1

@@ -12,17 +12,21 @@ from rich import print
 from birdclef.model_config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
+import multiprocessing as mp
 
 app = typer.Typer()
 
 
-@app.command()
-def main(
-    input_path: str = typer.Argument(..., help="Path to the input audio files."),
-    output_path: str = typer.Argument(..., help="Path to save the output results."),
-    model_path: str = typer.Argument(..., help="Path to the pre-trained model."),
-    model_name: str = typer.Argument(..., help="Name of the embedding model."),
+def process_part(
+    input_path,
+    output_path,
+    model_path,
+    model_name,
+    part: int,
+    total_parts: int,
+    limit=None,
 ):
+    """Process a single part of the audio files."""
     # load the bmz model
     embedder = bmz.list_models()[model_name]()
 
@@ -43,7 +47,16 @@ def main(
 
     # let's embed one file at a time; there's no need to batch them all into a single frame
     audio_files = sorted(Path(input_path).expanduser().glob("*.ogg"))
-    for audio_file in tqdm.tqdm(audio_files, desc="Embedding audio files"):
+    if limit is not None:
+        audio_files = audio_files[:limit]
+    audio_files = [
+        audio_file
+        for i, audio_file in enumerate(audio_files)
+        if i % total_parts == part
+    ]
+    for audio_file in tqdm.tqdm(
+        audio_files, desc=f"Embedding audio files ({part + 1}/{total_parts})"
+    ):
         df = embedder.embed(
             audio_file.as_posix(),
             return_preds=False,
@@ -71,6 +84,39 @@ def main(
         temp_file.parent.mkdir(parents=True, exist_ok=True)
         df.write_parquet(temp_file.as_posix())
 
+
+@app.command()
+def main(
+    input_path: str = typer.Argument(..., help="Path to the input audio files."),
+    output_path: str = typer.Argument(..., help="Path to save the output results."),
+    model_path: str = typer.Argument(..., help="Path to the pre-trained model."),
+    model_name: str = typer.Argument(..., help="Name of the embedding model."),
+    num_worker: int = typer.Option(4, help="Number of worker processes to use."),
+    limit: int | None = typer.Option(
+        None,
+        help="Limit the number of audio files to process. If None, process all files.",
+    ),
+):
+    # Parallelize the processing of audio files using mp.Pool
+    with mp.Pool(num_worker) as pool:
+        pool.starmap(
+            process_part,
+            [
+                (
+                    input_path,
+                    output_path,
+                    model_path,
+                    model_name,
+                    part,
+                    num_worker,
+                    limit,
+                )
+                for part in range(num_worker)
+            ],
+        )
+
+    model_path = Path(model_path).expanduser()
+    label_to_index = json.loads((model_path / "label_to_idx.json").read_text())
     # and now we generate the file submission
     df = pl.scan_parquet(f"{output_path}/intermediate")
     # output is row_id in format {stem}_{end_time}, and a column for each prediction
