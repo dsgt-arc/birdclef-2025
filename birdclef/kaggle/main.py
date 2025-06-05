@@ -33,8 +33,8 @@ def main(
     checkpoint = list(model_path.glob("checkpoints/*.ckpt"))[0]
     classifier = LinearClassifier.load_from_checkpoint(
         checkpoint.as_posix(),
-        model_config[model_name]["embed_size"],
-        len(label_to_index),
+        input_dim=model_config[model_name]["embed_size"],
+        num_classes=len(label_to_index),
     )
     classifier.eval()
     # classifier = LinearClassifier(
@@ -64,12 +64,9 @@ def main(
         # and now run inference on the embedding vector
         X = df.get_column("embedding").to_torch().to(torch.float32)
         # convert to polars DataFrame
-        df = df.with_columns(
-            pl.Series(
-                "predictions",
-                torch.softmax(classifier(X), dim=1).numpy().tolist(),
-            )
-        )
+        with torch.no_grad():
+            pred = torch.softmax(classifier(X), dim=1)
+        df = df.with_columns(pl.Series("predictions", pred.numpy().tolist()))
         temp_file = Path(output_path) / f"intermediate/{audio_file.stem}.parquet"
         temp_file.parent.mkdir(parents=True, exist_ok=True)
         df.write_parquet(temp_file.as_posix())
