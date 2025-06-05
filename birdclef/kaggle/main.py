@@ -29,12 +29,17 @@ def main(
     # load the classification head
     # NOTE: we could optimize this by compiling into onnx
     model_path = Path(model_path).expanduser()
-    # checkpoint = list(model_path.glob("checkpoints/*.ckpt"))[0]
-    # classifier = LinearClassifier.load_from_checkpoint(checkpoint.as_posix())'
     label_to_index = json.loads((model_path / "label_to_idx.json").read_text())
-    classifier = LinearClassifier(
-        model_config[model_name]["embed_size"], len(label_to_index)
+    checkpoint = list(model_path.glob("checkpoints/*.ckpt"))[0]
+    classifier = LinearClassifier.load_from_checkpoint(
+        checkpoint.as_posix(),
+        model_config[model_name]["embed_size"],
+        len(label_to_index),
     )
+    classifier.eval()
+    # classifier = LinearClassifier(
+    #     model_config[model_name]["embed_size"], len(label_to_index)
+    # )
 
     # let's embed one file at a time; there's no need to batch them all into a single frame
     audio_files = sorted(Path(input_path).expanduser().glob("*.ogg"))
@@ -57,16 +62,12 @@ def main(
             ),
         ).sort("file", "start_time")
         # and now run inference on the embedding vector
-        with torch.no_grad():
-            X = df.get_column("embedding").to_torch().to(torch.float32)
-            # make sure to softmax
-            pred = classifier(X)
-            pred = torch.softmax(pred, dim=1)
-            # convert to polars DataFrame
+        X = df.get_column("embedding").to_torch().to(torch.float32)
+        # convert to polars DataFrame
         df = df.with_columns(
             pl.Series(
                 "predictions",
-                pred.numpy().tolist(),
+                torch.softmax(classifier(X), dim=1).numpy().tolist(),
             )
         )
         temp_file = Path(output_path) / f"intermediate/{audio_file.stem}.parquet"
