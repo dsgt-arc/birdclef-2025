@@ -9,7 +9,7 @@ import tqdm
 import typer
 from rich import print
 
-from birdclef.model_config import model_config
+from birdclef.config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
 import multiprocessing as mp
