@@ -13,6 +13,7 @@ from birdclef.config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
 import multiprocessing as mp
+from .compile import load_tflite_interpreter, run_perch_tflite
 
 app = typer.Typer()
 
@@ -28,11 +29,28 @@ def process_part(
 ):
     """Process a single part of the audio files."""
     # load the bmz model
+    model_path = Path(model_path).expanduser()
     embedder = bmz.list_models()[model_name]()
+    if model_name == "Perch":
+        # look for tflite file next to the label_to_idx...
+        tflite_path = list(model_path.glob("*.tflite"))[0]
+        interpreter = load_tflite_interpreter(tflite_path.as_posix())
+
+        def embed_func(audio_file):
+            return run_perch_tflite(
+                interpreter, embedder.predict_dataloader([audio_file.as_posix()])
+            )
+    else:
+
+        def embed_func(audio_file):
+            return embedder.embed(
+                [audio_file.as_posix()],
+                return_preds=False,
+                clip_step=model_config[model_name]["clip_step"],
+            )
 
     # load the classification head
     # NOTE: we could optimize this by compiling into onnx
-    model_path = Path(model_path).expanduser()
     label_to_index = json.loads((model_path / "label_to_idx.json").read_text())
     checkpoint = list(model_path.glob("checkpoints/*.ckpt"))[0]
     classifier = LinearClassifier.load_from_checkpoint(
@@ -57,11 +75,7 @@ def process_part(
     for audio_file in tqdm.tqdm(
         audio_files, desc=f"Embedding audio files ({part + 1}/{total_parts})"
     ):
-        df = embedder.embed(
-            audio_file.as_posix(),
-            return_preds=False,
-            clip_step=model_config[model_name]["clip_step"],
-        )
+        df = embed_func(audio_file)
         df = pl.from_pandas(df.reset_index())
         # generate the embedding vector
         df = df.select(
@@ -91,7 +105,7 @@ def main(
     output_path: str = typer.Argument(..., help="Path to save the output results."),
     model_path: str = typer.Argument(..., help="Path to the pre-trained model."),
     model_name: str = typer.Argument(..., help="Name of the embedding model."),
-    num_worker: int = typer.Option(4, help="Number of worker processes to use."),
+    num_worker: int = typer.Option(1, help="Number of worker processes to use."),
     limit: int | None = typer.Option(
         None,
         help="Limit the number of audio files to process. If None, process all files.",
