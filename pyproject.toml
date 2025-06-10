@@ -45,6 +45,7 @@ dependencies = [
     "polars>=1.30.0",
     "faiss-cpu>=1.11.0",
     "gensim>=4.3.3",
+    "openvino>=2025.1.0",
 ]
 
 [project.optional-dependencies]
