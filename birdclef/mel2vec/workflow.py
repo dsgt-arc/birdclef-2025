@@ -126,6 +126,8 @@ class Word2VecOptionsMixin(OptionsMixin):
 
 
 class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
+    """Task to train a Word2Vec model on a specific set of audio files."""
+
     def requires(self):
         return {
             "tokenizer": BuildTokenizer(
@@ -210,7 +212,18 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
 
 
 class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
-    """Task to embed audio files using the trained Word2Vec model."""
+    """Task to embed audio files using the trained Word2Vec model.
+
+    We should be using the soundscape dataset to train the word2vec model.
+    We'll want to embed the actual mfccs on the training dataset though.
+    """
+
+    soundscape_root = luigi.Parameter(
+        description="Directory containing soundscape audio files to process",
+    )
+    output_prefix = luigi.Parameter(
+        description="Prefix for the output directory",
+    )
 
     def output(self):
         prefix = "/".join(
@@ -224,11 +237,13 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
                 ("epochs", self.epochs),
             ]
         )
-        return luigi.LocalTarget(f"{self.output_root}/embedding/{prefix}")
+        return luigi.LocalTarget(
+            f"{self.output_root}/embedding/{self.output_prefix}/{prefix}"
+        )
 
     def requires(self):
         word2vec = Word2VecTask(
-            input_root=self.input_root,
+            input_root=self.soundscape_root,
             output_root=self.output_root,
             epochs=self.epochs,
             vector_size=self.vector_size,
@@ -308,23 +323,42 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
 
 @app.command()
 def run(
-    input_root: str, output_root: str, gensim_workers: int = 8, luigi_workers: int = 8
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 8,
 ):
-    """Run the tokenizer building process."""
+    """Run the tokenizer building process.
+
+    Note that the inputs for train and soundscape roots as of writing of this comment
+    is for these to be the pre-computed MFCCs, and not the raw audio.
+    """
     luigi.build(
         [
             EmbedWord2VecTask(
                 input_root=input_root,
+                soundscape_root=soundscape_root,
                 output_root=output_root,
-                epochs=100,
-                vector_size=256,
-                window=80,
-                ns_exponent=0.75,
-                sample=1e-4,
+                output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
+                **params,
             )
             for tokenizer in ["tokenizer", "tokenizer_pca"]
+            for input_root, output_prefix in [
+                (train_root, "train"),
+                (soundscape_root, "soundscape"),
+            ]
+            for params in [
+                {
+                    "epochs": 100,
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                }
+            ]
         ],
         workers=luigi_workers,
         local_scheduler=True,
