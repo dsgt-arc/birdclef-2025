@@ -1,14 +1,17 @@
-import luigi
+from pathlib import Path
+
 import faiss
-import typer
+import luigi
 import numpy as np
 import polars as pl
-from pathlib import Path
-from .callback import TqdmCallback
-from gensim.models import Word2Vec, KeyedVectors
-from functools import cache
-from birdclef.spark import get_spark
+import typer
+from gensim.models import Word2Vec
 from pyspark.sql import functions as F
+
+from birdclef.spark import get_spark
+
+from . import loaders
+from .callback import TqdmCallback
 
 app = typer.Typer()
 
@@ -240,22 +243,6 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
             "tokenizer": word2vec.requires(),
         }
 
-    @cache
-    def get_index(self):
-        """Get the FAISS index for the centroids."""
-        centroids = np.load(self.requires()["tokenizer"].output()["centroids"].path)
-        index = faiss.IndexFlatL2(centroids.shape[1])
-        index.add(centroids)
-        return index
-
-    @cache
-    def get_word_vectors(self):
-        """Get the word vectors from the Word2Vec model."""
-        word_vectors = KeyedVectors.load(
-            self.requires()["word2vec"].output()["wordvectors"].path
-        )
-        return word_vectors
-
     def run(self):
         with get_spark() as spark:
 
@@ -267,19 +254,29 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
                         return i
                 return -1
 
-            index = self.get_index()
-            word_vectors = self.get_word_vectors()
+            # yeah kind of gross
+            wv_path = self.requires()["word2vec"].output()["wordvectors"].path
+            index_path = self.requires()["tokenizer"].output()["centroids"].path
+            if self.tokenizer == "tokenizer_pca":
+                pca_path = self.requires()["tokenizer"].output()["pca"].path
+            else:
+                pca_path = None
 
             @F.udf(returnType="array<float>")
-            def mfcc_to_wv(mfcc: list) -> list:
+            def mfcc_to_wv(
+                mfcc: list,
+                wv_path: str = wv_path,
+                index_path: str = index_path,
+                pca_path: str | None = pca_path,
+            ) -> list:
                 # convert mfcc to word vectors
                 X = np.array(mfcc).reshape(1, -1)
                 if self.tokenizer == "tokenizer_pca":
                     # unfortunately we can't serialize PCA so reread it from disk every time,
-                    pca = faiss.read_VectorTransform(
-                        self.requires()["tokenizer"].output()["pca"].path
-                    )
+                    pca = loaders.get_pca(pca_path)
                     X = pca.apply(X)
+                index = loaders.get_index(index_path)
+                word_vectors = loaders.get_word_vectors(wv_path)
                 _, indices = index.search(X, 1)
                 return word_vectors[indices[0][0]].tolist()
 
