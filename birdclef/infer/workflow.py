@@ -8,6 +8,8 @@ from contexttimer import Timer
 from rich import print
 from birdclef.gpu import is_gpu_enabled
 from birdclef.model_config import model_config
+import polars as pl
+import numpy as np
 
 app = typer.Typer()
 
@@ -112,7 +114,7 @@ class ProcessPartition(luigi.Task, OptionsMixin):
             )
 
 
-class ProcessAudio(luigi.Task, OptionsMixin):
+class AggregatePredictions(luigi.Task, OptionsMixin):
     def requires(self):
         """Define dependencies: one ProcessPartition task for each partition."""
         limit = self.limit if self.limit > 0 else self.num_partitions
@@ -130,12 +132,48 @@ class ProcessAudio(luigi.Task, OptionsMixin):
             )
 
     def output(self):
+        return luigi.LocalTarget(f"{self.output_root}/agg_predictions.parquet")
+
+    def run(self):
+        """Aggregate predictions into 5-second intervals."""
+        predict_dir = Path(self.output_root) / "parts" / "predict"
+        df = pl.scan_parquet(predict_dir / "*.parquet")
+        
+        interval_length = 5
+        df = df.with_columns(
+            ((pl.col("start_time") + pl.col("end_time")) / 2 / interval_length)
+            .cast(pl.Int64)
+            .alias("interval")
+        )
+
+        df = df.group_by(
+            ["file", "interval"]
+        ).agg(
+            pl.col("*").exclude(["file", "interval", "start_time", "end_time"]).mean()
+        ).sort(["file", "interval"])
+
+        df.collect().write_parquet(self.output().path)
+
+
+class ProcessAudio(luigi.Task, OptionsMixin):
+    def requires(self):
+        """Define dependencies: AggregatePredictions task."""
+        return AggregatePredictions(
+            input_root=self.input_root,
+            output_root=self.output_root,
+            model_name=self.model_name,
+            clip_step=self.clip_step,
+            num_partitions=self.num_partitions,
+            use_subset=self.use_subset,
+            limit=self.limit,
+        )
+
+    def output(self):
         """Output is a success flag indicating all partitions are done."""
         return luigi.LocalTarget(f"{self.output_root}/_SUCCESS")
 
     def run(self):
         """Create the success flag file once all dependencies are met."""
-        # Logic moved to ProcessPartition. This task just aggregates.
         print(f"All partitions processed for {self.model_name}.")
         with self.output().open("w") as f:
             f.write("")

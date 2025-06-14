@@ -1,7 +1,9 @@
 #!/bin/bash
-#SBATCH --job-name=infer --account=paceship-dsgt_clef2025
-#SBATCH -N1 -n1 --cpus-per-task=24 --mem-per-cpu=8G
-#SBATCH -t240 -qinferno -oReport-%j.out
+#SBATCH --job-name=infer-BirdNET --account=paceship-dsgt_clef2025
+#SBATCH -N1 -n1 --cpus-per-task=16 --mem-per-cpu=8G
+#SBATCH -t120 -qembers -oReport-%j.out
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=acheung@gatech.edu
 set -eu
 source ~/scratch/birdclef/.venv/bin/activate
 
@@ -15,10 +17,9 @@ project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 
 python -m birdclef.infer.workflow process-audio \
-    $project_dir/raw/birdclef-2025/train_soundscapes \
-    $project_dir/2025/infer-soundscape-cpu \
+    $scratch_dir/raw/birdclef-2025/train_soundscapes \
+    $scratch_dir/2025/infer-soundscape \
     --model-name ${1:-"BirdNET"} \
-    --clip-step 5.0 \
     --num-workers ${NUM_WORKERS:-24} \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi) \
     $(if [ "${USE_SUBSET:-false}" = "true" ]; then echo "--use-subset"; fi) \
