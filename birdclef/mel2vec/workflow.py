@@ -544,12 +544,106 @@ def tune_tokenizer(
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
-                    "epochs": 5,
+                    "epochs": 20,
                     "vector_size": 256,
                     "window": 80,
                     "ns_exponent": 0.75,
                     "sample": 1e-4,
                 }
+            ]
+        ],
+        workers=luigi_workers,
+        local_scheduler=True,
+    )
+
+
+@app.command()
+def tune_w2v(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 8,
+):
+    """Tune the Word2Vec model parameters."""
+    luigi.build(
+        [
+            EvalWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                tokenizer_n_clusters=tokenizer_n_clusters,
+                filter_species=colombia_species_list,
+                epochs=20,
+                **params,
+            )
+            for tokenizer in ["tokenizer"]
+            for tokenizer_n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [(train_root, "train")]
+            for params in [
+                # Baseline Configuration
+                {
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                },
+                # Varying Vector Size
+                {
+                    "vector_size": 128,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                },
+                {
+                    "vector_size": 384,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                },
+                # Varying Window Size
+                {
+                    "vector_size": 256,
+                    "window": 40,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                },
+                {
+                    "vector_size": 256,
+                    "window": 120,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                },
+                # Varying Negative Sampling Exponent (Key for imbalance)
+                {
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.0,
+                    "sample": 1e-4,
+                },
+                {
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": -0.5,
+                    "sample": 1e-4,
+                },
+                # Varying Downsampling Rate
+                {
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-5,
+                },
+                # Combination Experiment: Optimized for Rare Species
+                {
+                    "vector_size": 256,
+                    "window": 120,
+                    "ns_exponent": -0.5,
+                    "sample": 1e-4,
+                },
             ]
         ],
         workers=luigi_workers,
