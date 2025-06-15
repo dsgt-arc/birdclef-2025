@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=birdclef-melspectrogram --account=paceship-dsgt_clef2025 --qos=inferno
+#SBATCH --job-name=birdclef-melspectrogram --account=paceship-dsgt_clef2025
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=24 --mem-per-cpu=6G
-#SBATCH --time=02:00:00  --output=logs/Report-melspectrogram-%A_%a.out
+#SBATCH --qos=embers --time=02:00:00 --output=logs/Report-melspectrogram-%j.log
 
 set -xeu
 
@@ -15,5 +15,11 @@ scratch_dir=$(realpath ~/scratch/birdclef)
 python -m birdclef.mfcc.workflow \
     $project_dir/raw/birdclef-2025/train_soundscapes \
     $scratch_dir/2025/mfcc-soundscape \
+    --num-workers ${NUM_WORKERS:-24} \
+    $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)
+
+python -m birdclef.mfcc.workflow \
+    $project_dir/raw/birdclef-2025/train_audio \
+    $scratch_dir/2025/mfcc-train \
     --num-workers ${NUM_WORKERS:-24} \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)

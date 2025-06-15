@@ -1,14 +1,17 @@
-import luigi
+from pathlib import Path
+
 import faiss
-import typer
+import luigi
 import numpy as np
 import polars as pl
-from pathlib import Path
-from .callback import TqdmCallback
-from gensim.models import Word2Vec, KeyedVectors
-from functools import cache
-from birdclef.spark import get_spark
+import typer
+from gensim.models import Word2Vec
 from pyspark.sql import functions as F
+
+from birdclef.spark import get_spark
+
+from . import loaders
+from .callback import TqdmCallback
 
 app = typer.Typer()
 
@@ -123,6 +126,8 @@ class Word2VecOptionsMixin(OptionsMixin):
 
 
 class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
+    """Task to train a Word2Vec model on a specific set of audio files."""
+
     def requires(self):
         return {
             "tokenizer": BuildTokenizer(
@@ -207,7 +212,18 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
 
 
 class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
-    """Task to embed audio files using the trained Word2Vec model."""
+    """Task to embed audio files using the trained Word2Vec model.
+
+    We should be using the soundscape dataset to train the word2vec model.
+    We'll want to embed the actual mfccs on the training dataset though.
+    """
+
+    soundscape_root = luigi.Parameter(
+        description="Directory containing soundscape audio files to process",
+    )
+    output_prefix = luigi.Parameter(
+        description="Prefix for the output directory",
+    )
 
     def output(self):
         prefix = "/".join(
@@ -221,11 +237,13 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
                 ("epochs", self.epochs),
             ]
         )
-        return luigi.LocalTarget(f"{self.output_root}/embedding/{prefix}")
+        return luigi.LocalTarget(
+            f"{self.output_root}/embedding/{self.output_prefix}/{prefix}"
+        )
 
     def requires(self):
         word2vec = Word2VecTask(
-            input_root=self.input_root,
+            input_root=self.soundscape_root,
             output_root=self.output_root,
             epochs=self.epochs,
             vector_size=self.vector_size,
@@ -240,22 +258,6 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
             "tokenizer": word2vec.requires(),
         }
 
-    @cache
-    def get_index(self):
-        """Get the FAISS index for the centroids."""
-        centroids = np.load(self.requires()["tokenizer"].output()["centroids"].path)
-        index = faiss.IndexFlatL2(centroids.shape[1])
-        index.add(centroids)
-        return index
-
-    @cache
-    def get_word_vectors(self):
-        """Get the word vectors from the Word2Vec model."""
-        word_vectors = KeyedVectors.load(
-            self.requires()["word2vec"].output()["wordvectors"].path
-        )
-        return word_vectors
-
     def run(self):
         with get_spark() as spark:
 
@@ -267,19 +269,29 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
                         return i
                 return -1
 
-            index = self.get_index()
-            word_vectors = self.get_word_vectors()
+            # yeah kind of gross
+            wv_path = self.requires()["word2vec"].output()["wordvectors"].path
+            index_path = self.requires()["tokenizer"].output()["centroids"].path
+            if self.tokenizer == "tokenizer_pca":
+                pca_path = self.requires()["tokenizer"].output()["pca"].path
+            else:
+                pca_path = None
 
             @F.udf(returnType="array<float>")
-            def mfcc_to_wv(mfcc: list) -> list:
+            def mfcc_to_wv(
+                mfcc: list,
+                wv_path: str = wv_path,
+                index_path: str = index_path,
+                pca_path: str | None = pca_path,
+            ) -> list:
                 # convert mfcc to word vectors
                 X = np.array(mfcc).reshape(1, -1)
                 if self.tokenizer == "tokenizer_pca":
                     # unfortunately we can't serialize PCA so reread it from disk every time,
-                    pca = faiss.read_VectorTransform(
-                        self.requires()["tokenizer"].output()["pca"].path
-                    )
+                    pca = loaders.get_pca(pca_path)
                     X = pca.apply(X)
+                index = loaders.get_index(index_path)
+                word_vectors = loaders.get_word_vectors(wv_path)
                 _, indices = index.search(X, 1)
                 return word_vectors[indices[0][0]].tolist()
 
@@ -311,23 +323,42 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
 
 @app.command()
 def run(
-    input_root: str, output_root: str, gensim_workers: int = 8, luigi_workers: int = 8
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 8,
 ):
-    """Run the tokenizer building process."""
+    """Run the tokenizer building process.
+
+    Note that the inputs for train and soundscape roots as of writing of this comment
+    is for these to be the pre-computed MFCCs, and not the raw audio.
+    """
     luigi.build(
         [
             EmbedWord2VecTask(
                 input_root=input_root,
+                soundscape_root=soundscape_root,
                 output_root=output_root,
-                epochs=100,
-                vector_size=256,
-                window=80,
-                ns_exponent=0.75,
-                sample=1e-4,
+                output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
+                **params,
             )
             for tokenizer in ["tokenizer", "tokenizer_pca"]
+            for input_root, output_prefix in [
+                (train_root, "train"),
+                (soundscape_root, "soundscape"),
+            ]
+            for params in [
+                {
+                    "epochs": 100,
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                }
+            ]
         ],
         workers=luigi_workers,
         local_scheduler=True,
