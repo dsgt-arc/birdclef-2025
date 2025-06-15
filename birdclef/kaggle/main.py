@@ -38,7 +38,11 @@ def process_part(
 
         def embed_func(audio_file):
             return run_tflite(
-                interpreter, embedder.predict_dataloader([audio_file.as_posix()])
+                interpreter, 
+                embedder.predict_dataloader(
+                    [audio_file.as_posix()],
+                    clip_step=model_config[model_name]["clip_step"]
+                )
             )
     else:
         def embed_func(audio_file):
@@ -91,23 +95,22 @@ def process_part(
             pred = torch.softmax(classifier(X), dim=1)
         df = df.with_columns(pl.Series("predictions", pred.numpy().tolist()))
 
-        # Aggregate predictions into 5-second intervals
+        # aggregate predictions into 5-second intervals
         interval_length = 5
-        # First create interval column
         df = df.with_columns(
             ((pl.col("start_time") + pl.col("end_time")) / 2 / interval_length)
             .cast(pl.Int64)
             .alias("interval")
         )
         
-        # Group by file and interval, averaging predictions
+        # average predictions
         df = df.group_by(
             ["file", "interval"]
         ).agg(
             pl.col("*").exclude(["file", "interval", "start_time", "end_time"]).mean()
         ).sort(["file", "interval"])
 
-        # Convert interval to end_time
+        # convert interval to end_time
         df = df.with_columns(
             pl.col("interval")
             .add(1)

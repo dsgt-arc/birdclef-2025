@@ -60,7 +60,6 @@ def compile_perch(compiled_root: Path):
         f.write(tflite_model)
 
 
-@app.command()
 def save_birdnet(compiled_root: Path):
     url = "https://github.com/kahst/BirdNET-Analyzer/raw/v1.3.1/checkpoints/V2.4/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite"
     response = requests.get(url)
@@ -70,7 +69,6 @@ def save_birdnet(compiled_root: Path):
         f.write(response.content)
         
 
-@app.command()
 def compile_model(compiled_root: Path, model_name: str):
     if model_name == "BirdNET":
         save_birdnet(compiled_root)
