@@ -41,7 +41,6 @@ def process_part(
                 interpreter, embedder.predict_dataloader([audio_file.as_posix()])
             )
     else:
-
         def embed_func(audio_file):
             return embedder.embed(
                 [audio_file.as_posix()],
