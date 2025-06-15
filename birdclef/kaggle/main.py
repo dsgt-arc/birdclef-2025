@@ -13,7 +13,7 @@ from birdclef.config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
 import multiprocessing as mp
-from .compile import load_tflite_interpreter, run_perch_tflite
+from .compile import load_tflite_interpreter, run_tflite
 
 app = typer.Typer()
 
@@ -31,13 +31,13 @@ def process_part(
     # load the bmz model
     model_path = Path(model_path).expanduser()
     embedder = bmz.list_models()[model_name]()
-    if model_name == "Perch":
+    if model_name in ["BirdNET", "Perch"]:
         # look for tflite file next to the label_to_idx...
         tflite_path = list(model_path.glob("*.tflite"))[0]
         interpreter = load_tflite_interpreter(tflite_path.as_posix())
 
         def embed_func(audio_file):
-            return run_perch_tflite(
+            return run_tflite(
                 interpreter, embedder.predict_dataloader([audio_file.as_posix()])
             )
     else:
@@ -59,9 +59,6 @@ def process_part(
         num_classes=len(label_to_index),
     )
     classifier.eval()
-    # classifier = LinearClassifier(
-    #     model_config[model_name]["embed_size"], len(label_to_index)
-    # )
 
     # let's embed one file at a time; there's no need to batch them all into a single frame
     audio_files = sorted(Path(input_path).expanduser().glob("*.ogg"))
@@ -94,6 +91,31 @@ def process_part(
         with torch.no_grad():
             pred = torch.softmax(classifier(X), dim=1)
         df = df.with_columns(pl.Series("predictions", pred.numpy().tolist()))
+
+        # Aggregate predictions into 5-second intervals
+        interval_length = 5
+        # First create interval column
+        df = df.with_columns(
+            ((pl.col("start_time") + pl.col("end_time")) / 2 / interval_length)
+            .cast(pl.Int64)
+            .alias("interval")
+        )
+        
+        # Group by file and interval, averaging predictions
+        df = df.group_by(
+            ["file", "interval"]
+        ).agg(
+            pl.col("*").exclude(["file", "interval", "start_time", "end_time"]).mean()
+        ).sort(["file", "interval"])
+
+        # Convert interval to end_time
+        df = df.with_columns(
+            pl.col("interval")
+            .add(1)
+            .mul(interval_length)
+            .alias("end_time")
+        ).drop("interval")
+
         temp_file = Path(output_path) / f"intermediate/{audio_file.stem}.parquet"
         temp_file.parent.mkdir(parents=True, exist_ok=True)
         df.write_parquet(temp_file.as_posix())

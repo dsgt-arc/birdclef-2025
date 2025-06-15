@@ -11,6 +11,7 @@ from birdclef.config import model_config
 import openvino as ov
 import json
 import torch
+import requests
 
 app = typer.Typer()
 
@@ -24,7 +25,7 @@ def load_tflite_interpreter(model_path: Path):
     return interpreter
 
 
-def run_perch_tflite(interpreter, dataloader) -> pd.DataFrame:
+def run_tflite(interpreter, dataloader) -> pd.DataFrame:
     input_details = interpreter.get_input_details()
     output_details = interpreter.get_output_details()
     res = []
@@ -60,6 +61,26 @@ def compile_perch(compiled_root: Path):
 
 
 @app.command()
+def save_birdnet(compiled_root: Path):
+    url = "https://github.com/kahst/BirdNET-Analyzer/raw/v1.3.1/checkpoints/V2.4/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite"
+    response = requests.get(url)
+    compiled_root = Path(compiled_root).expanduser()
+    compiled_root.mkdir(parents=True, exist_ok=True)
+    with (compiled_root / "birdnet.tflite").open("wb") as f:
+        f.write(response.content)
+        
+
+@app.command()
+def compile_model(compiled_root: Path, model_name: str):
+    if model_name == "BirdNET":
+        save_birdnet(compiled_root)
+    elif model_name == "Perch":
+        compile_perch(compiled_root)
+    else:
+        raise ValueError(f"Model {model_name} is not supported.")
+
+
+@app.command()
 def compile_classifier_head(compiled_root: Path, model_name: str, checkpoint: Path):
     """Compile the classifier head for the given model."""
     if model_name not in model_config:
@@ -89,37 +110,37 @@ def compile_classifier_head(compiled_root: Path, model_name: str, checkpoint: Pa
 
 
 @app.command()
-def benchmark_perch(
+def benchmark_model(
     test_audio: Path,
     compiled_root: Path,
     checkpoint: Path,
+    model_name: str,
     batch_size: int = 1,
 ):
-    """Benchmark the Perch model."""
+    """Benchmark any model from bioacoustics_model_zoo."""
     audio = [p.as_posix() for p in Path(test_audio).expanduser().glob("*.ogg")]
-    interpreter = load_tflite_interpreter(Path(compiled_root) / "perch.tflite")
-    perch = bmz.list_models()["Perch"]()
+    interpreter = load_tflite_interpreter(Path(compiled_root) / f"{model_name.lower()}.tflite")
+    model = bmz.list_models()[model_name]()
 
-    # initialize perch for xla compilation
-    perch.embed(audio[:1], batch_size=batch_size)
+    # initialize model for xla compilation
+    model.embed(audio[:1], batch_size=batch_size)
 
-    print("Running Perch")
+    print(f"Running {model_name}")
     with Timer() as timer:
-        res = perch.embed(audio, batch_size=batch_size)
+        res = model.embed(audio, batch_size=batch_size)
     print(f"data in shape {res.shape}")
-    print(f"Perch took {timer.elapsed:.2f} seconds for {len(audio)} files")
+    print(f"{model_name} took {timer.elapsed:.2f} seconds for {len(audio)} files")
     print(res.head())
 
-    print("Running Perch TFLite model...")
+    print(f"Running {model_name} TFLite model...")
     with Timer() as timer:
-        dataloader = perch.predict_dataloader(audio, batch_size=batch_size)
-        res = run_perch_tflite(interpreter, dataloader)
+        dataloader = model.predict_dataloader(audio, batch_size=batch_size)
+        res = run_tflite(interpreter, dataloader)
     print(res.head())
 
-    print(f"Perch TFLite took {timer.elapsed:.2f} seconds for {len(audio)} files")
+    print(f"{model_name} TFLite took {timer.elapsed:.2f} seconds for {len(audio)} files")
 
     # run the classification head
-    model_name = "Perch"
     checkpoint = Path(checkpoint).expanduser()
     label_to_index = json.loads(
         (checkpoint.parent.parent / "label_to_idx.json").read_text()
