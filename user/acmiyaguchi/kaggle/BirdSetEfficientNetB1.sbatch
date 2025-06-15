@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=birdclef-efficientnet --account=paceship-dsgt_clef2025 --qos=inferno
-#SBATCH --nodes=1 --ntasks=1 --cpus-per-task=24 --mem-per-cpu=6G
+#SBATCH --nodes=1 --ntasks=1 --cpus-per-task=4 --mem-per-cpu=8G
 #SBATCH --time=04:00:00 --output=logs/Report-efficientnet-%j.log
 
 set -eu

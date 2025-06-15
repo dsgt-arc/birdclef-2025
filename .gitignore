@@ -16,3 +16,5 @@ Report-*
 notebooks/**/*.txt
 .scratch/
 .data/
+.locks/
+models--*/

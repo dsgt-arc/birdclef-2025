@@ -13,8 +13,5 @@ set -x
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 
-python -m birdclef.kaggle.main \
-    $scratch_dir/test_soundscape \
-    $scratch_dir/tmp/output \
-    $project_dir/models/2025/v1/Perch/torch-linear-v1 \
-    Perch
+python -m birdclef.kaggle.compile compile-perch \
+    $project_dir/models/2025/v1/Perch/torch-linear-v1
