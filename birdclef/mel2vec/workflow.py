@@ -7,6 +7,9 @@ import polars as pl
 import typer
 from gensim.models import Word2Vec
 from pyspark.sql import functions as F
+from contexttimer import Timer
+import json
+from birdclef.config import colombia_species_list
 
 from birdclef.spark import get_spark
 
@@ -123,6 +126,10 @@ class Word2VecOptionsMixin(OptionsMixin):
         choices=["tokenizer", "tokenizer_pca"],
         description="The tokenizer to use for training the Word2Vec model",
     )
+    tokenizer_n_clusters = luigi.IntParameter(
+        default=2**14 - 1,
+        description="Number of clusters to use for the tokenizer",
+    )
 
 
 class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
@@ -133,10 +140,12 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             "tokenizer": BuildTokenizer(
                 input_root=self.input_root,
                 output_root=self.output_root,
+                n_clusters=self.tokenizer_n_clusters,
             ),
             "tokenizer_pca": BuildPCATokenizer(
                 input_root=self.input_root,
                 output_root=self.output_root,
+                n_clusters=self.tokenizer_n_clusters,
             ),
         }[self.tokenizer]
 
@@ -158,6 +167,9 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             ),
             "wordvectors": luigi.LocalTarget(
                 f"{self.output_root}/word2vec/{prefix}/word2vec.wordvectors"
+            ),
+            "timing": luigi.LocalTarget(
+                f"{self.output_root}/word2vec/{prefix}/timing.json"
             ),
         }
 
@@ -187,28 +199,42 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
         ids = pl.Series("token", indices.flatten())
         token_df = df.with_columns(ids)
 
-        model = Word2Vec(
-            sentences=list(self.token_generator(token_df)),
-            epochs=self.epochs,
-            vector_size=self.vector_size,
-            # 5 seconds, 8 frames per second = 40
-            # can go to 10 seconds to have more context
-            min_count=1,
-            window=self.window,
-            sg=1,
-            negative=5,
-            ns_exponent=self.ns_exponent,
-            sample=self.sample,
-            workers=self.workers,
-            compute_loss=True,
-            shrink_windows=True,
-            callbacks=[TqdmCallback(total_epochs=self.epochs)],
-        )
+        with Timer() as t:
+            model = Word2Vec(
+                sentences=list(self.token_generator(token_df)),
+                epochs=self.epochs,
+                vector_size=self.vector_size,
+                # 5 seconds, 8 frames per second = 40
+                # can go to 10 seconds to have more context
+                min_count=1,
+                window=self.window,
+                sg=1,
+                negative=5,
+                ns_exponent=self.ns_exponent,
+                sample=self.sample,
+                workers=self.workers,
+                compute_loss=True,
+                shrink_windows=True,
+                callbacks=[TqdmCallback(total_epochs=self.epochs)],
+            )
         # ensure folder
         output_dir = Path(self.output()["model"].path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
         model.save(self.output()["model"].path)
         model.wv.save(self.output()["wordvectors"].path)
+        with open(self.output()["timing"].path, "w") as f:
+            json.dump(
+                {
+                    "time": t.elapsed,
+                    "epochs": self.epochs,
+                    "vector_size": self.vector_size,
+                    "window": self.window,
+                    "ns_exponent": self.ns_exponent,
+                    "sample": self.sample,
+                    "workers": self.workers,
+                },
+                f,
+            )
 
 
 class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
@@ -224,12 +250,17 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
     output_prefix = luigi.Parameter(
         description="Prefix for the output directory",
     )
+    filter_species = luigi.ListParameter(
+        default=[],
+        description="List of species to filter on",
+    )
 
     def output(self):
         prefix = "/".join(
             f"{k}={v}"
             for k, v in [
                 ("tokenizer", self.tokenizer),
+                ("tokenizer_n_clusters", self.tokenizer_n_clusters),
                 ("vector_size", self.vector_size),
                 ("window", self.window),
                 ("ns_exponent", self.ns_exponent),
@@ -252,6 +283,7 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
             sample=self.sample,
             workers=self.workers,
             tokenizer=self.tokenizer,
+            tokenizer_n_clusters=self.tokenizer_n_clusters,
         )
         return {
             "word2vec": word2vec,
@@ -304,9 +336,20 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
             def avg_vector(vectors: list) -> list:
                 return np.mean(np.array(vectors), axis=0).tolist()
 
+            df = spark.read.parquet(self.input_root)
+            if "train" in self.input_root and self.filter_species:
+                df = (
+                    df.withColumn(
+                        "species", F.udf(lambda x: Path(x).parts[-2], "string")("file")
+                    )
+                    .where(
+                        F.col("species").isin([F.lit(x) for x in self.filter_species])
+                    )
+                    .drop("species")
+                )
+
             (
-                spark.read.parquet(self.input_root)
-                .withColumn("start_time", get_start_time(F.col("timestamp")))
+                df.withColumn("start_time", get_start_time(F.col("timestamp")))
                 .withColumn("word_vector", mfcc_to_wv(F.col("mfcc")))
                 .groupBy("file", "start_time")
                 .agg(
@@ -353,6 +396,51 @@ def run(
             for params in [
                 {
                     "epochs": 100,
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                }
+            ]
+        ],
+        workers=luigi_workers,
+        local_scheduler=True,
+    )
+
+
+@app.command()
+def tune_tokenizer(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 8,
+):
+    """Run the tokenizer building process.
+
+    Note that the inputs for train and soundscape roots as of writing of this comment
+    is for these to be the pre-computed MFCCs, and not the raw audio.
+    """
+    luigi.build(
+        [
+            EmbedWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                tokenizer_n_clusters=tokenizer_n_clusters,
+                filter_species=colombia_species_list,
+                **params,
+            )
+            for tokenizer in ["tokenizer"]
+            # 16k, 32k, 64k
+            for tokenizer_n_clusters in [2**14 - 1, 2**15 - 1, 2**16 - 1]
+            for input_root, output_prefix in [(train_root, "train")]
+            for params in [
+                {
+                    "epochs": 5,
                     "vector_size": 256,
                     "window": 80,
                     "ns_exponent": 0.75,

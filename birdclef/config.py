@@ -413,3 +413,31 @@ def get_species(species_set: str = "2025") -> list[str]:
 @cache
 def get_species_label_encoder(*args, **kwargs) -> LabelEncoder:
     return LabelEncoder().fit(get_species(*args, **kwargs))
+
+
+colombia_species_list = [
+    # Amphibia
+    "65344",  # Boettger's Colombian Tree Frog
+    "555086",  # Rusty Tree Frog
+    # Aves
+    "blkvul",  # Black Vulture
+    "eardov1",  # Eared Dove
+    "paldov1",  # Pale-vented Pigeon
+    "neocor",  # Neotropic Cormorant
+    "cogher1",  # Cocoi Heron
+    "savhaw1",  # Savanna Hawk
+    "blhpar1",  # Blue-headed Parrot
+    "scamac1",  # Scarlet Macaw
+    "gsflea1",  # Great-crested Flycatcher
+    "cattyr",  # Cattle Tyrant
+    "socfly1",  # Social Flycatcher (Added)
+    "horcre1",  # House Wren
+    "tropar",  # Tropical Parula
+    "butsal1",  # Buff-throated Saltator
+    # Insecta
+    "1462737",  # Docidocercus fasciatus
+    "1192948",  # Oxyprora surinamensis
+    # Mammalia
+    "47067",  # Brown-throated Three-toed Sloth
+    "75154",  # Capybara
+]
