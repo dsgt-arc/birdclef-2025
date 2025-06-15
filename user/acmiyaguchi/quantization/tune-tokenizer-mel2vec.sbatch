@@ -13,13 +13,11 @@ set -x
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 
-
-
-export PYSPARK_EXECUTOR_CORES=24
-export PYSPARK_DRIVER_MEMORY=$(( 24*6-4 ))g
+export PYSPARK_EXECUTOR_CORES=${PYSPARK_EXECUTOR_CORES:-24}
+export PYSPARK_DRIVER_MEMORY=$(( $PYSPARK_EXECUTOR_CORES*6-4 ))g
 python -m birdclef.mel2vec.workflow tune-tokenizer \
     $scratch_dir/2025/mfcc-train/data \
     $scratch_dir/2025/mfcc-soundscape/data \
     $scratch_dir/2025/mel2vec-tune/tokenizer \
-    --gensim-workers 24 \
+    --gensim-workers $PYSPARK_EXECUTOR_CORES \
     --luigi-workers 1

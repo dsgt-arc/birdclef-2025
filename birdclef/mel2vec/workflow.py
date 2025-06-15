@@ -1,16 +1,22 @@
+import json
 from pathlib import Path
 
 import faiss
 import luigi
+import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
 import typer
-from gensim.models import Word2Vec
-from pyspark.sql import functions as F
 from contexttimer import Timer
-import json
-from birdclef.config import colombia_species_list
+from gensim.models import Word2Vec
+from pacmap import PaCMAP
+from pyspark.sql import functions as F
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, f1_score
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
 
+from birdclef.config import colombia_species_list
 from birdclef.spark import get_spark
 
 from . import loaders
@@ -37,7 +43,7 @@ class BuildTokenizer(luigi.Task, OptionsMixin):
     def output(self):
         return {
             "centroids": luigi.LocalTarget(
-                f"{self.output_root}/{self.prefix}/centroids.npy"
+                f"{self.output_root}/{self.prefix}/n_clusters={self.n_clusters}/centroids.npy"
             )
         }
 
@@ -83,9 +89,11 @@ class BuildPCATokenizer(BuildTokenizer):
     def output(self):
         return {
             "centroids": luigi.LocalTarget(
-                f"{self.output_root}/{self.prefix}/centroids.npy"
+                f"{self.output_root}/{self.prefix}/n_clusters={self.n_clusters}/centroids.npy"
             ),
-            "pca": luigi.LocalTarget(f"{self.output_root}/{self.prefix}/pca.bin"),
+            "pca": luigi.LocalTarget(
+                f"{self.output_root}/{self.prefix}/n_clusters={self.n_clusters}pca.bin"
+            ),
         }
 
     def _save_pca(self, pca):
@@ -154,6 +162,7 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             f"{k}={v}"
             for k, v in [
                 ("tokenizer", self.tokenizer),
+                ("tokenizer_n_clusters", self.tokenizer_n_clusters),
                 ("vector_size", self.vector_size),
                 ("window", self.window),
                 ("ns_exponent", self.ns_exponent),
@@ -237,23 +246,32 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             )
 
 
-class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
-    """Task to embed audio files using the trained Word2Vec model.
-
-    We should be using the soundscape dataset to train the word2vec model.
-    We'll want to embed the actual mfccs on the training dataset though.
-    """
-
+class EmbedWord2VecOptionsMixin(Word2VecOptionsMixin):
+    input_root = luigi.Parameter(
+        description="Directory containing audio files to process",
+    )
     soundscape_root = luigi.Parameter(
-        description="Directory containing soundscape audio files to process",
+        description="Directory containing soundscape files to train Word2Vec",
+    )
+    output_root = luigi.Parameter(
+        description="Directory to save the output files",
     )
     output_prefix = luigi.Parameter(
-        description="Prefix for the output directory",
+        default="train",
+        description="Prefix for the output files",
     )
     filter_species = luigi.ListParameter(
         default=[],
         description="List of species to filter on",
     )
+
+
+class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
+    """Task to embed audio files using the trained Word2Vec model.
+
+    We should be using the soundscape dataset to train the word2vec model.
+    We'll want to embed the actual mfccs on the training dataset though.
+    """
 
     def output(self):
         prefix = "/".join(
@@ -296,7 +314,7 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
             @F.udf(returnType="integer")
             def get_start_time(timestamp, interval=5) -> int:
                 # up to but not including the value
-                for i in range(0, 100, interval):
+                for i in range(0, 1000, interval):
                     if i <= timestamp < i + interval:
                         return i
                 return -1
@@ -356,12 +374,98 @@ class EmbedWord2VecTask(luigi.Task, Word2VecOptionsMixin):
                     F.collect_list("mfcc").alias("mfcc"),
                     F.collect_list("word_vector").alias("word_vector"),
                 )
+                .where(F.col("start_time") >= 0)
                 .withColumn("mfcc_stats", get_mfcc_stats(F.col("mfcc")))
                 .withColumn("word_vector", avg_vector(F.col("word_vector")))
                 .select("file", "start_time", "mfcc_stats", "word_vector")
                 .repartition(20)
                 .write.parquet(self.output().path, mode="overwrite"),
             )
+
+
+class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
+    """Task to evaluate word2vec model using logistic regression on the training set.
+
+    On perch, we get a model that gets a f1 score of 0.85 on our list of species.
+    """
+
+    def requires(self):
+        return {
+            "embed": EmbedWord2VecTask(
+                input_root=self.input_root,
+                soundscape_root=self.soundscape_root,
+                output_root=self.output_root,
+                output_prefix="train",
+                filter_species=self.filter_species,
+                tokenizer=self.tokenizer,
+                tokenizer_n_clusters=self.tokenizer_n_clusters,
+                vector_size=self.vector_size,
+                window=self.window,
+                ns_exponent=self.ns_exponent,
+                sample=self.sample,
+                epochs=self.epochs,
+            ),
+        }
+
+    def output(self):
+        # get the output prefix from the embed task, and replace embedding with logistic
+        output_root = Path(
+            self.requires()["embed"].output().path.replace("embedding", "logistic", 1)
+        )
+        return {
+            "scores": luigi.LocalTarget(f"{output_root}/scores.json"),
+            "classification_report": luigi.LocalTarget(
+                f"{output_root}/classification_report.txt"
+            ),
+            "plot": luigi.LocalTarget(f"{output_root}/plot.png"),
+        }
+
+    def run(self):
+        # note, the mfcc one only needs to be run once, so here is really just the
+        # word2vec performance
+        embed_output_path = self.requires()["embed"].output().path
+        df = (
+            pl.read_parquet(f"{embed_output_path}/**/*.parquet")
+            .sort("file", "start_time")
+            .with_columns(species=pl.col("file").str.split("/").list.get(-2))
+            .filter(pl.col("species").is_in(colombia_species_list))
+            .select("species", pl.col("word_vector").alias("embedding"))
+            .to_pandas()
+        )
+        X = np.stack(df["embedding"].values)
+        y = df["species"].values
+        le = LabelEncoder()
+        y = le.fit_transform(y)
+        # stratify the split by species
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42, stratify=y
+        )
+        model = LogisticRegression(max_iter=1000, n_jobs=-1)
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        scores = {
+            "f1_macro_score": f1_score(y_test, y_pred, average="macro"),
+            "f1_micro_score": f1_score(y_test, y_pred, average="micro"),
+            "accuracy": model.score(X_test, y_test),
+        }
+        output_root = Path(self.output()["scores"].path).parent
+        output_root.mkdir(parents=True, exist_ok=True)
+        with open(self.output()["scores"].path, "w") as f:
+            json.dump(scores, f)
+
+        report = classification_report(y_test, y_pred, target_names=le.classes_)
+        with open(self.output()["classification_report"].path, "w") as f:
+            f.write(report)
+
+        # plot the first two components
+        z = PaCMAP().fit_transform(X)
+        for i, species in enumerate(le.classes_):
+            plt.scatter(z[y == i, 0], z[y == i, 1], label=species, alpha=0.5, s=1)
+        plt.legend()
+        plt.xlabel("PaCMAP 1")
+        plt.ylabel("PaCMAP 2")
+        plt.title("PaCMAP projection of Word2Vec embeddings")
+        plt.savefig(self.output()["plot"].path)
 
 
 @app.command()
@@ -423,7 +527,7 @@ def tune_tokenizer(
     """
     luigi.build(
         [
-            EmbedWord2VecTask(
+            EvalWord2VecTask(
                 input_root=input_root,
                 soundscape_root=soundscape_root,
                 output_root=output_root,
@@ -435,8 +539,8 @@ def tune_tokenizer(
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            # 16k, 32k, 64k
-            for tokenizer_n_clusters in [2**14 - 1, 2**15 - 1, 2**16 - 1]
+            # 4k, 8k, 16k, 32k, 64k
+            for tokenizer_n_clusters in [2**12, 2**13, 2**14 - 1, 2**15 - 1, 2**16 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -456,5 +560,8 @@ def tune_tokenizer(
 if __name__ == "__main__":
     import multiprocessing
 
-    multiprocessing.set_start_method("spawn")
+    try:
+        multiprocessing.set_start_method("spawn")
+    except RuntimeError:
+        pass
     app()

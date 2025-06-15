@@ -416,28 +416,24 @@ def get_species_label_encoder(*args, **kwargs) -> LabelEncoder:
 
 
 colombia_species_list = [
-    # Amphibia
-    "65344",  # Boettger's Colombian Tree Frog
-    "555086",  # Rusty Tree Frog
-    # Aves
-    "blkvul",  # Black Vulture
-    "eardov1",  # Eared Dove
-    "paldov1",  # Pale-vented Pigeon
-    "neocor",  # Neotropic Cormorant
-    "cogher1",  # Cocoi Heron
-    "savhaw1",  # Savanna Hawk
-    "blhpar1",  # Blue-headed Parrot
-    "scamac1",  # Scarlet Macaw
-    "gsflea1",  # Great-crested Flycatcher
-    "cattyr",  # Cattle Tyrant
-    "socfly1",  # Social Flycatcher (Added)
-    "horcre1",  # House Wren
-    "tropar",  # Tropical Parula
-    "butsal1",  # Buff-throated Saltator
-    # Insecta
-    "1462737",  # Docidocercus fasciatus
-    "1192948",  # Oxyprora surinamensis
-    # Mammalia
-    "47067",  # Brown-throated Three-toed Sloth
-    "75154",  # Capybara
+    "socfly1",  # Social Flycatcher (Aves) - count: 3347
+    "strcuc1",  # Striped Cuckoo (Aves) - count: 2862
+    "tropar",  # Tropical Parula (Aves) - count: 2578
+    "strfly1",  # Streaked Flycatcher (Aves) - count: 2443
+    "butsal1",  # Buff-throated Saltator (Aves) - count: 2282
+    "52884",  # True Crickets (Insecta) - count: 1191
+    "blhpar1",  # Blue-headed Parrot (Aves) - count: 1006
+    "cattyr",  # Cattle Tyrant (Aves) - count: 808
+    "eardov1",  # Eared Dove (Aves) - count: 500
+    "neocor",  # Neotropic Cormorant (Aves) - count: 491
+    "blkvul",  # Black Vulture (Aves) - count: 402
+    "555086",  # Rusty Tree Frog (Amphibia) - count: 259
+    "67252",  # Veined Tree Frog (Amphibia) - count: 231
+    "savhaw1",  # Savanna Hawk (Aves) - count: 230
+    "1462737",  # Docidocercus fasciatus (Insecta) - count: 140
+    "65344",  # Boettger's Colombian Tree Frog (Amphibia) - count: 92
+    "1192948",  # Oxyprora surinamensis (Insecta) - count: 83
+    "41778",  # Neotropical River Otter (Mammalia) - count: 40
+    "47067",  # Brown-throated Three-toed Sloth (Mammalia) - count: 14
+    "42113",  # Collared Peccary (Mammalia) - count: 4
 ]
