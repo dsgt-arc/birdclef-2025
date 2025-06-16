@@ -649,6 +649,12 @@ def tune_w2v(
                     "ns_exponent": 0.75,
                     "sample": 1e-5,
                 },
+                {
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-6,
+                },
                 # Combination Experiment: Optimized for Rare Species
                 {
                     "vector_size": 256,
@@ -656,6 +662,61 @@ def tune_w2v(
                     "ns_exponent": -0.5,
                     "sample": 1e-4,
                 },
+            ]
+        ],
+        workers=luigi_workers,
+        local_scheduler=True,
+    )
+
+
+@app.command()
+def tune_ns(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 8,
+):
+    """Tune the Word2Vec model parameters."""
+    luigi.build(
+        [
+            EvalWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                tokenizer_n_clusters=tokenizer_n_clusters,
+                filter_species=colombia_species_list,
+                epochs=20,
+                **params,
+            )
+            for tokenizer in ["tokenizer"]
+            for tokenizer_n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [(train_root, "train")]
+            for params in [
+                {
+                    "vector_size": 384,
+                    "window": 80,
+                    "ns_exponent": ns_exponent,
+                    "sample": 1e-5,
+                }
+                for ns_exponent in [
+                    -1.5,
+                    -1.25,
+                    -1.0,
+                    -0.75,
+                    -0.5,
+                    -0.25,
+                    0.0,
+                    0.25,
+                    0.5,
+                    0.75,
+                    1.0,
+                    1.25,
+                    1.5,
+                ]
             ]
         ],
         workers=luigi_workers,
