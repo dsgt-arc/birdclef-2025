@@ -604,6 +604,18 @@ def tune_w2v(
                     "ns_exponent": 0.75,
                     "sample": 1e-4,
                 },
+                {
+                    "vector_size": 512,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                },
+                {
+                    "vector_size": 1028,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                },
                 # Varying Window Size
                 {
                     "vector_size": 256,
