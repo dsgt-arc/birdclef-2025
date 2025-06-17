@@ -797,6 +797,51 @@ def evaluate_strawman(
     )
 
 
+@app.command()
+def evaluate_v1(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 8,
+):
+    """Evaluate the model over 100 parameters.
+
+    If things are done correctly, then we should be able to get a model that is
+    checkpointed every 10 epochs.
+    """
+    luigi.build(
+        [
+            EvalWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                tokenizer_n_clusters=tokenizer_n_clusters,
+                filter_species=colombia_species_list,
+                epochs=epochs,
+                **params,
+            )
+            for tokenizer in ["tokenizer"]
+            for tokenizer_n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [(train_root, "train")]
+            for params in [
+                {
+                    "vector_size": 384,
+                    "window": 80,
+                    "ns_exponent": 1.5,
+                    "sample": 1e-5,
+                }
+            ]
+            for epochs in [10 * i for i in range(1, 11)]
+        ],
+        workers=luigi_workers,
+        local_scheduler=True,
+    )
+
+
 if __name__ == "__main__":
     import multiprocessing
 
