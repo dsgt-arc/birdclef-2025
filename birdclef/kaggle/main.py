@@ -13,7 +13,7 @@ from birdclef.config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
 import multiprocessing as mp
-from .compile import load_tflite_interpreter, run_tflite
+from .compile import load_tflite_interpreter, run_perch_tflite, run_birdnet_tflite
 
 app = typer.Typer()
 
@@ -26,6 +26,7 @@ def process_part(
     part: int,
     total_parts: int,
     limit=None,
+    tflite_threads=None,
 ):
     """Process a single part of the audio files."""
     # load the bmz model
@@ -35,15 +36,17 @@ def process_part(
     if model_name in ["BirdNET", "Perch"]:
         # look for tflite file next to the label_to_idx...
         tflite_path = list(model_path.glob("*.tflite"))[0]
-        interpreter = load_tflite_interpreter(tflite_path.as_posix())
+        interpreter = load_tflite_interpreter(tflite_path.as_posix(), num_threads=tflite_threads)
+
         def embed_func(audio_file):
-            return run_tflite(
-                interpreter, 
-                embedder.predict_dataloader(
-                    [audio_file.as_posix()],
-                    clip_step=clip_step,
+            if model_name == "BirdNET":
+                return run_birdnet_tflite(
+                    interpreter, embedder.predict_dataloader([audio_file.as_posix()], clip_step=clip_step)
                 )
-            )
+            else:
+                return run_perch_tflite(
+                    interpreter, embedder.predict_dataloader([audio_file.as_posix()], clip_step=clip_step)
+                )
     else:
         def embed_func(audio_file):
             return embedder.embed(
@@ -133,6 +136,10 @@ def main(
         None,
         help="Limit the number of audio files to process. If None, process all files.",
     ),
+    tflite_threads: int | None = typer.Option(
+        None,
+        help="Number of threads to use for TFLite inference. If None, use the default number of threads.",
+    ),
 ):
     # Parallelize the processing of audio files using mp.Pool
     with mp.Pool(num_worker) as pool:
@@ -147,6 +154,7 @@ def main(
                     part,
                     num_worker,
                     limit,
+                    tflite_threads,
                 )
                 for part in range(num_worker)
             ],
