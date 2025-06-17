@@ -836,6 +836,33 @@ def evaluate_v1(
                 }
             ]
             for epochs in [10 * i for i in range(1, 11)]
+        ]
+        + [
+            EmbedWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                tokenizer_n_clusters=tokenizer_n_clusters,
+                **params,
+            )
+            for tokenizer in ["tokenizer"]
+            for tokenizer_n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [
+                (train_root, "train_all"),
+                (soundscape_root, "soundscape_all"),
+            ]
+            for params in [
+                {
+                    "epochs": 100,
+                    "vector_size": 384,
+                    "window": 80,
+                    "ns_exponent": 1.5,
+                    "sample": 1e-5,
+                }
+            ]
         ],
         workers=luigi_workers,
         local_scheduler=True,
