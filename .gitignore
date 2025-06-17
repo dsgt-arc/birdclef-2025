@@ -14,3 +14,7 @@ build/
 Report-*
 *.tflite
 notebooks/**/*.txt
+.scratch/
+.data/
+.locks/
+models--*/

@@ -6,8 +6,8 @@ from sklearn.model_selection import train_test_split
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
-from .data_v2 import BirdDataModule
-from .model import LinearClassifier
+from .data import BirdDataModule
+from ..model import LinearClassifier
 import pytorch_lightning as pl
 
 pl.seed_everything(42, workers=True)  # for reproducibility
@@ -21,7 +21,7 @@ def load_metadata(input_path: str) -> pd.DataFrame:
     df["species_name"] = df["file"].apply(
         lambda x: x.split("train_audio/")[1].split("/")[0]
     )
-    # train/test split requries y label to have at least 2 samples
+    # train/test split requires y label to have at least 2 samples
     # remove species with less than 2 samples
     species_count = df["species_name"].value_counts()
     valid_species = species_count[species_count >= 2].index
