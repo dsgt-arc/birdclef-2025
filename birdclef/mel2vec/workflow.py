@@ -92,7 +92,7 @@ class BuildPCATokenizer(BuildTokenizer):
                 f"{self.output_root}/{self.prefix}/n_clusters={self.n_clusters}/centroids.npy"
             ),
             "pca": luigi.LocalTarget(
-                f"{self.output_root}/{self.prefix}/n_clusters={self.n_clusters}pca.bin"
+                f"{self.output_root}/{self.prefix}/n_clusters={self.n_clusters}/pca.bin"
             ),
         }
 
@@ -138,13 +138,14 @@ class Word2VecOptionsMixin(OptionsMixin):
         default=2**14 - 1,
         description="Number of clusters to use for the tokenizer",
     )
+    step = luigi.IntParameter(default=10, description="Number of epochs per checkpoint")
 
 
 class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
     """Task to train a Word2Vec model on a specific set of audio files."""
 
     def requires(self):
-        return {
+        reqs = {
             "tokenizer": BuildTokenizer(
                 input_root=self.input_root,
                 output_root=self.output_root,
@@ -155,7 +156,18 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
                 output_root=self.output_root,
                 n_clusters=self.tokenizer_n_clusters,
             ),
-        }[self.tokenizer]
+        }
+        # recursive dependency for checkpointing.
+        # the base epoch size is the step size.
+        if self.epochs > self.step:
+            return {
+                "tokenizer": reqs[self.tokenizer],
+                "prev": self.clone(
+                    epochs=self.epochs - self.step,
+                ),
+            }
+        else:
+            return {"tokenizer": reqs[self.tokenizer]}
 
     def output(self):
         prefix = "/".join(
@@ -189,7 +201,7 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             yield sub.sort("timestamp").get_column("token").to_list()
 
     def run(self):
-        centroids = np.load(self.requires().output()["centroids"].path)
+        centroids = np.load(self.requires()["tokenizer"].output()["centroids"].path)
         index = faiss.IndexFlatL2(centroids.shape[1])
         index.add(centroids)
 
@@ -201,7 +213,9 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
 
         X = np.stack(df.select("mfcc").collect().get_column("mfcc").to_numpy())
         if self.tokenizer == "tokenizer_pca":
-            pca = faiss.read_VectorTransform(self.requires().output()["pca"].path)
+            pca = faiss.read_VectorTransform(
+                self.requires()["tokenizer"].output()["pca"].path
+            )
             X = pca.apply(X)
         X = X.astype(np.float32)
         _, indices = index.search(X, 1)
@@ -209,23 +223,34 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
         token_df = df.with_columns(ids)
 
         with Timer() as t:
-            model = Word2Vec(
-                sentences=list(self.token_generator(token_df)),
-                epochs=self.epochs,
-                vector_size=self.vector_size,
-                # 5 seconds, 8 frames per second = 40
-                # can go to 10 seconds to have more context
-                min_count=1,
-                window=self.window,
-                sg=1,
-                negative=5,
-                ns_exponent=self.ns_exponent,
-                sample=self.sample,
-                workers=self.workers,
-                compute_loss=True,
-                shrink_windows=True,
-                callbacks=[TqdmCallback(total_epochs=self.epochs)],
-            )
+            if "prev" not in self.requires():
+                model = Word2Vec(
+                    sentences=list(self.token_generator(token_df)),
+                    epochs=self.step,
+                    vector_size=self.vector_size,
+                    min_count=1,
+                    window=self.window,
+                    sg=1,
+                    negative=5,
+                    ns_exponent=self.ns_exponent,
+                    sample=self.sample,
+                    workers=self.workers,
+                    compute_loss=True,
+                    shrink_windows=True,
+                    callbacks=[TqdmCallback(total_epochs=self.step)],
+                )
+            else:
+                # continue training from previous checkpoint
+                model = Word2Vec.load(self.requires()["prev"].output()["model"].path)
+                model.train(
+                    list(self.token_generator(token_df)),
+                    total_examples=model.corpus_count,
+                    epochs=self.step,
+                    start_alpha=model.alpha,
+                    end_alpha=model.min_alpha,
+                    compute_loss=True,
+                    callbacks=[TqdmCallback(total_epochs=self.step)],
+                )
         # ensure folder
         output_dir = Path(self.output()["model"].path).parent
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -305,7 +330,7 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
         )
         return {
             "word2vec": word2vec,
-            "tokenizer": word2vec.requires(),
+            "tokenizer": word2vec.requires()["tokenizer"],
         }
 
     def run(self):
@@ -468,48 +493,48 @@ class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
         plt.savefig(self.output()["plot"].path)
 
 
-@app.command()
-def run(
-    train_root: str,
-    soundscape_root: str,
-    output_root: str,
-    gensim_workers: int = 8,
-    luigi_workers: int = 8,
-):
-    """Run the tokenizer building process.
+# @app.command()
+# def run(
+#     train_root: str,
+#     soundscape_root: str,
+#     output_root: str,
+#     gensim_workers: int = 8,
+#     luigi_workers: int = 8,
+# ):
+#     """Run the tokenizer building process.
 
-    Note that the inputs for train and soundscape roots as of writing of this comment
-    is for these to be the pre-computed MFCCs, and not the raw audio.
-    """
-    luigi.build(
-        [
-            EmbedWord2VecTask(
-                input_root=input_root,
-                soundscape_root=soundscape_root,
-                output_root=output_root,
-                output_prefix=output_prefix,
-                workers=gensim_workers,
-                tokenizer=tokenizer,
-                **params,
-            )
-            for tokenizer in ["tokenizer", "tokenizer_pca"]
-            for input_root, output_prefix in [
-                (train_root, "train"),
-                (soundscape_root, "soundscape"),
-            ]
-            for params in [
-                {
-                    "epochs": 100,
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                }
-            ]
-        ],
-        workers=luigi_workers,
-        local_scheduler=True,
-    )
+#     Note that the inputs for train and soundscape roots as of writing of this comment
+#     is for these to be the pre-computed MFCCs, and not the raw audio.
+#     """
+#     luigi.build(
+#         [
+#             EmbedWord2VecTask(
+#                 input_root=input_root,
+#                 soundscape_root=soundscape_root,
+#                 output_root=output_root,
+#                 output_prefix=output_prefix,
+#                 workers=gensim_workers,
+#                 tokenizer=tokenizer,
+#                 **params,
+#             )
+#             for tokenizer in ["tokenizer", "tokenizer_pca"]
+#             for input_root, output_prefix in [
+#                 (train_root, "train"),
+#                 (soundscape_root, "soundscape"),
+#             ]
+#             for params in [
+#                 {
+#                     "epochs": 100,
+#                     "vector_size": 256,
+#                     "window": 80,
+#                     "ns_exponent": 0.75,
+#                     "sample": 1e-4,
+#                 }
+#             ]
+#         ],
+#         workers=luigi_workers,
+#         local_scheduler=True,
+#     )
 
 
 @app.command()
@@ -716,8 +741,56 @@ def tune_ns(
                     1.0,
                     1.25,
                     1.5,
+                    1.75,
+                    2.0,
+                    2.5,
                 ]
             ]
+        ],
+        workers=luigi_workers,
+        local_scheduler=True,
+    )
+
+
+@app.command()
+def evaluate_strawman(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 8,
+):
+    """Evaluate the model over 100 parameters.
+
+    If things are done correctly, then we should be able to get a model that is
+    checkpointed every 10 epochs.
+    """
+    luigi.build(
+        [
+            EvalWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                tokenizer_n_clusters=tokenizer_n_clusters,
+                filter_species=colombia_species_list,
+                epochs=epochs,
+                **params,
+            )
+            for tokenizer in ["tokenizer"]
+            for tokenizer_n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [(train_root, "train")]
+            for params in [
+                {
+                    "vector_size": 256,
+                    "window": 80,
+                    "ns_exponent": 0.75,
+                    "sample": 1e-4,
+                }
+            ]
+            for epochs in [10 * i for i in range(1, 11)]
         ],
         workers=luigi_workers,
         local_scheduler=True,
