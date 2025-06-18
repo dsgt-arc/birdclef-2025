@@ -18,13 +18,13 @@ app = typer.Typer()
 
 
 def load_mel2vec_data(input_path: str, model_name) -> pd.DataFrame:
-    if model_name == "mel2vec_mfcc":
+    if model_name == "mfcc":
         col = "mfcc_stats"
     else:
-        col = "word_vector"
+        col = "mel2vec"
 
     # normally polars would be named pl, but we have naming conflict right now
-    df = polars.read_parquet(f"{input_path}/*.parquet").select(
+    df = polars.read_parquet(input_path, hive_partitioning=True).select(
         polars.col("file").str.split("/").list.get(-2).alias("species"),
         polars.col(col).alias("embeddings"),
     )
@@ -41,7 +41,7 @@ def load_mel2vec_data(input_path: str, model_name) -> pd.DataFrame:
 
 
 def load_preprocess_data(input_path: str, model_name: str = "") -> pd.DataFrame:
-    if model_name.startswith("mel2vec"):
+    if model_name in ["mel2vec", "mfcc"]:
         return load_mel2vec_data(input_path, model_name)
 
     df = pd.read_parquet(input_path)
