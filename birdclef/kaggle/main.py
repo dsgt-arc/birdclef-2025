@@ -80,24 +80,7 @@ def process_part(
     ):
         df = embed_func(audio_file)
         df = pl.from_pandas(df.reset_index())
-        # generate the embedding vector
-        df = df.select(
-            "file",
-            "start_time",
-            "end_time",
-            (
-                pl.concat_list(df.columns[3:])
-                .list.to_array(len(df.columns[3:]))
-                .alias("embedding")
-            ),
-        ).sort("file", "start_time")
-        # and now run inference on the embedding vector
-        X = df.get_column("embedding").to_torch().to(torch.float32)
-        # convert to polars DataFrame
-        with torch.no_grad():
-            pred = torch.softmax(classifier(X), dim=1)
-        df = df.with_columns(pl.Series("predictions", pred.numpy().tolist()))
-
+        
         if clip_step != 5.0:
             # aggregate predictions into 5-second intervals
             interval_length = 5
@@ -111,7 +94,7 @@ def process_part(
                 ["file", "interval"]
             ).agg(
                 pl.col("*").exclude(["file", "interval", "start_time", "end_time"]).mean()
-            ).sort(["file", "interval"])
+            )
             # convert interval to end_time
             df = df.with_columns(
                 pl.col("interval")
@@ -119,6 +102,26 @@ def process_part(
                 .mul(interval_length)
                 .alias("end_time")
             ).drop("interval")
+        else:
+            # ensure same format as above case with aggregation
+            df = df.drop("start_time")
+        
+        # generate the embedding vector
+        df = df.select(
+            "file",
+            "end_time",
+            (
+                pl.concat_list(pl.all().exclude("file", "end_time"))
+                .list.to_array(len(df.columns) - 2)
+                .alias("embedding")
+            ),
+        ).sort("file", "end_time")
+        # and now run inference on the embedding vector
+        X = df.get_column("embedding").to_torch().to(torch.float32)
+        # convert to polars DataFrame
+        with torch.no_grad():
+            pred = torch.softmax(classifier(X), dim=1)
+        df = df.with_columns(pl.Series("predictions", pred.numpy().tolist()))
 
         temp_file = Path(output_path) / f"intermediate/{audio_file.stem}.parquet"
         temp_file.parent.mkdir(parents=True, exist_ok=True)

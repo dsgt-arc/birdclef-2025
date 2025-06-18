@@ -20,7 +20,8 @@ def load_tflite_interpreter(model_path: Path, num_threads: int = None):
     """Load a TFLite interpreter for the given model path."""
     interpreter = tf.lite.Interpreter(
         num_threads=num_threads,
-        model_path=Path(model_path).expanduser().as_posix()
+        model_path=Path(model_path).expanduser().as_posix(),
+        experimental_preserve_all_tensors=True,
     )
     interpreter.allocate_tensors()
     return interpreter
@@ -49,7 +50,7 @@ def run_birdnet_tflite(interpreter, dataloader) -> pd.DataFrame:
     for batch in dataloader:
         interpreter.set_tensor(input_details[0]["index"], batch[0])
         interpreter.invoke()
-        output_data = interpreter.get_tensor(output_details[0]["index"])
+        output_data = interpreter.get_tensor(output_details[0]["index"] - 1)
         res.append(output_data)
     return pd.DataFrame(
         data=np.stack(res).squeeze(),
