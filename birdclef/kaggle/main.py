@@ -26,13 +26,16 @@ def process_part(
     part: int,
     total_parts: int,
     limit=None,
+    clip_step=None,
     tflite_threads=None,
 ):
     """Process a single part of the audio files."""
     # load the bmz model
     model_path = Path(model_path).expanduser()
     embedder = bmz.list_models()[model_name]()
-    clip_step = model_config[model_name]["clip_step"]
+    if clip_step is None:
+        clip_step = model_config[model_name]["clip_step"]
+        
     if model_name in ["BirdNET", "Perch"]:
         # look for tflite file next to the label_to_idx...
         tflite_path = list(model_path.glob("*.tflite"))[0]
@@ -139,6 +142,10 @@ def main(
         None,
         help="Limit the number of audio files to process. If None, process all files.",
     ),
+    clip_step: float | None = typer.Option(
+        None,
+        help="Clip step to use for the embedding model. If None, use the default clip step.",
+    ),
     tflite_threads: int | None = typer.Option(
         None,
         help="Number of threads to use for TFLite inference. If None, use the default number of threads.",
@@ -157,6 +164,7 @@ def main(
                     part,
                     num_worker,
                     limit,
+                    clip_step,
                     tflite_threads,
                 )
                 for part in range(num_worker)
