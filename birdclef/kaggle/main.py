@@ -13,7 +13,7 @@ from birdclef.config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
 import multiprocessing as mp
-from .compile import load_tflite_interpreter, run_perch_tflite
+from .compile import load_tflite_interpreter, run_perch_tflite, run_birdnet_tflite
 
 app = typer.Typer()
 
@@ -26,27 +26,33 @@ def process_part(
     part: int,
     total_parts: int,
     limit=None,
+    tflite_threads=None,
 ):
     """Process a single part of the audio files."""
     # load the bmz model
     model_path = Path(model_path).expanduser()
     embedder = bmz.list_models()[model_name]()
-    if model_name == "Perch":
+    clip_step = model_config[model_name]["clip_step"]
+    if model_name in ["BirdNET", "Perch"]:
         # look for tflite file next to the label_to_idx...
         tflite_path = list(model_path.glob("*.tflite"))[0]
-        interpreter = load_tflite_interpreter(tflite_path.as_posix())
+        interpreter = load_tflite_interpreter(tflite_path.as_posix(), num_threads=tflite_threads)
 
         def embed_func(audio_file):
-            return run_perch_tflite(
-                interpreter, embedder.predict_dataloader([audio_file.as_posix()])
-            )
+            if model_name == "BirdNET":
+                return run_birdnet_tflite(
+                    interpreter, embedder.predict_dataloader([audio_file.as_posix()], clip_step=clip_step)
+                )
+            else:
+                return run_perch_tflite(
+                    interpreter, embedder.predict_dataloader([audio_file.as_posix()], clip_step=clip_step)
+                )
     else:
-
         def embed_func(audio_file):
             return embedder.embed(
                 [audio_file.as_posix()],
                 return_preds=False,
-                clip_step=model_config[model_name]["clip_step"],
+                clip_step=clip_step,
             )
 
     # load the classification head
@@ -59,9 +65,6 @@ def process_part(
         num_classes=len(label_to_index),
     )
     classifier.eval()
-    # classifier = LinearClassifier(
-    #     model_config[model_name]["embed_size"], len(label_to_index)
-    # )
 
     # let's embed one file at a time; there's no need to batch them all into a single frame
     audio_files = sorted(Path(input_path).expanduser().glob("*.ogg"))
@@ -77,23 +80,49 @@ def process_part(
     ):
         df = embed_func(audio_file)
         df = pl.from_pandas(df.reset_index())
+        
+        if clip_step != 5.0:
+            # aggregate predictions into 5-second intervals
+            interval_length = 5
+            df = df.with_columns(
+                ((pl.col("start_time") + pl.col("end_time")) / 2 / interval_length)
+                .cast(pl.Int64)
+                .alias("interval")
+            )
+            # average predictions
+            df = df.group_by(
+                ["file", "interval"]
+            ).agg(
+                pl.col("*").exclude(["file", "interval", "start_time", "end_time"]).mean()
+            )
+            # convert interval to end_time
+            df = df.with_columns(
+                pl.col("interval")
+                .add(1)
+                .mul(interval_length)
+                .alias("end_time")
+            ).drop("interval")
+        else:
+            # ensure same format as above case with aggregation
+            df = df.drop("start_time")
+        
         # generate the embedding vector
         df = df.select(
             "file",
-            "start_time",
             "end_time",
             (
-                pl.concat_list(df.columns[3:])
-                .list.to_array(len(df.columns[3:]))
+                pl.concat_list(pl.all().exclude("file", "end_time"))
+                .list.to_array(len(df.columns) - 2)
                 .alias("embedding")
             ),
-        ).sort("file", "start_time")
+        ).sort("file", "end_time")
         # and now run inference on the embedding vector
         X = df.get_column("embedding").to_torch().to(torch.float32)
         # convert to polars DataFrame
         with torch.no_grad():
             pred = torch.softmax(classifier(X), dim=1)
         df = df.with_columns(pl.Series("predictions", pred.numpy().tolist()))
+
         temp_file = Path(output_path) / f"intermediate/{audio_file.stem}.parquet"
         temp_file.parent.mkdir(parents=True, exist_ok=True)
         df.write_parquet(temp_file.as_posix())
@@ -110,6 +139,10 @@ def main(
         None,
         help="Limit the number of audio files to process. If None, process all files.",
     ),
+    tflite_threads: int | None = typer.Option(
+        None,
+        help="Number of threads to use for TFLite inference. If None, use the default number of threads.",
+    ),
 ):
     # Parallelize the processing of audio files using mp.Pool
     with mp.Pool(num_worker) as pool:
@@ -124,6 +157,7 @@ def main(
                     part,
                     num_worker,
                     limit,
+                    tflite_threads,
                 )
                 for part in range(num_worker)
             ],

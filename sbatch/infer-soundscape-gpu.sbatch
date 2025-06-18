@@ -1,7 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=infer --account=paceship-dsgt_clef2025
 #SBATCH --nodes=1 --gres=gpu:1 --constraint=RTX6000 --cpus-per-task=6 --mem-per-gpu=64G
-#SBATCH -t240 -qinferno -oReport-%j.out
+#SBATCH -t120 -qembers -oReport-%j.out
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=acheung@gatech.edu
 set -eux
 hostname
 
@@ -20,8 +22,8 @@ apptainer exec \
 source ~/scratch/birdclef/app/.venv/bin/activate
 set -eux
 python -m birdclef.infer.workflow process-audio \
-    $project_dir/raw/birdclef-2025/train_soundscapes \
-    $project_dir/2025/infer-soundscape \
+    $scratch_dir/raw/birdclef-2025/train_soundscapes \
+    $scratch_dir/2025/infer-soundscape \
     --assert-gpu \
     --model-name ${1:-"BirdNET"} \
     --num-workers ${NUM_WORKERS:-1} \

@@ -11,14 +11,17 @@ from birdclef.config import model_config
 import openvino as ov
 import json
 import torch
+import requests
 
 app = typer.Typer()
 
 
-def load_tflite_interpreter(model_path: Path):
+def load_tflite_interpreter(model_path: Path, num_threads: int = None):
     """Load a TFLite interpreter for the given model path."""
     interpreter = tf.lite.Interpreter(
-        model_path=Path(model_path).expanduser().as_posix()
+        num_threads=num_threads,
+        model_path=Path(model_path).expanduser().as_posix(),
+        experimental_preserve_all_tensors=True,
     )
     interpreter.allocate_tensors()
     return interpreter
@@ -39,8 +42,22 @@ def run_perch_tflite(interpreter, dataloader) -> pd.DataFrame:
         index=dataloader.dataset.dataset.label_df.index,
     )
 
+    
+def run_birdnet_tflite(interpreter, dataloader) -> pd.DataFrame:
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+    res = []
+    for batch in dataloader:
+        interpreter.set_tensor(input_details[0]["index"], batch[0])
+        interpreter.invoke()
+        output_data = interpreter.get_tensor(output_details[0]["index"] - 1)
+        res.append(output_data)
+    return pd.DataFrame(
+        data=np.stack(res).squeeze(),
+        index=dataloader.dataset.dataset.label_df.index,
+    )
 
-@app.command()
+
 def compile_perch(compiled_root: Path):
     perch = bmz.list_models()["Perch"]()
     # we still need to use this model to get the dataloader
@@ -57,6 +74,25 @@ def compile_perch(compiled_root: Path):
     compiled_root.mkdir(parents=True, exist_ok=True)
     with (compiled_root / "perch.tflite").open("wb") as f:
         f.write(tflite_model)
+
+
+def save_birdnet(compiled_root: Path):
+    url = "https://github.com/kahst/BirdNET-Analyzer/raw/v1.3.1/checkpoints/V2.4/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite"
+    response = requests.get(url)
+    compiled_root = Path(compiled_root).expanduser()
+    compiled_root.mkdir(parents=True, exist_ok=True)
+    with (compiled_root / "birdnet.tflite").open("wb") as f:
+        f.write(response.content)
+        
+
+@app.command()
+def compile_model(compiled_root: Path, model_name: str):
+    if model_name == "BirdNET":
+        save_birdnet(compiled_root)
+    elif model_name == "Perch":
+        compile_perch(compiled_root)
+    else:
+        raise ValueError(f"Model {model_name} is not supported.")
 
 
 @app.command()
