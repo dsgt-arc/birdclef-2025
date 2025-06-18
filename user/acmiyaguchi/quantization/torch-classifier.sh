@@ -27,7 +27,7 @@ dataset_name=train_audio-infer-soundscape
 model_name=${1:-"mel2vec"}
 
 python -m birdclef.torch.workflow \
-    $scratch_dir/2025/mfcc-train/data \
-    $project_dir/models/2025/v2/$model_name \
+    $scratch_dir/2025/mel2vec-v1/embedding/train_all \
+    $project_dir/models/2025/v2-anthony/$model_name \
     $model_name \
     --batch-size ${BATCH_SIZE:-64} \

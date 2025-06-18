@@ -21,10 +21,12 @@ def load_mel2vec_data(input_path: str, model_name) -> pd.DataFrame:
     if model_name == "mfcc":
         col = "mfcc_stats"
     else:
-        col = "mel2vec"
+        col = "word_vector"
 
     # normally polars would be named pl, but we have naming conflict right now
-    df = polars.read_parquet(input_path, hive_partitioning=True).select(
+    df = polars.read_parquet(
+        f"{input_path}/**/*.parquet", hive_partitioning=True
+    ).select(
         polars.col("file").str.split("/").list.get(-2).alias("species"),
         polars.col(col).alias("embeddings"),
     )
