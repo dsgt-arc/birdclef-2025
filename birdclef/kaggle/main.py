@@ -32,7 +32,14 @@ def process_part(
     """Process a single part of the audio files."""
     # load the bmz model
     model_path = Path(model_path).expanduser()
-    embedder = bmz.list_models()[model_name]()
+    if model_name == "BirdNET":
+        # prevent bmz from downloading BirdNET files on kaggle
+        embedder = bmz.BirdNET(
+            checkpoint_url=(model_path / "birdnet.tflite").as_posix(),
+            label_url=(model_path / "labels.txt").as_posix(),
+        )
+    else:
+        embedder = bmz.list_models()[model_name]()
     if clip_step is None:
         clip_step = model_config[model_name]["clip_step"]
         
