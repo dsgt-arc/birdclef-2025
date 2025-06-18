@@ -98,7 +98,9 @@ def main(
     )
 
     # logger and callbacks
-    logger = TensorBoardLogger("tb_logs", name="linear_classifier")
+    logger = TensorBoardLogger(
+        f"{output_path}/lightning_logs", name=f"{model_name}_linear_classifier"
+    )
 
     checkpoint_cb = ModelCheckpoint(
         monitor="val_loss",
