@@ -28,3 +28,10 @@ python -m birdclef.infer.workflow list-models
  'BirdSetEfficientNetB1': bioacoustics_model_zoo.bmz_birdset.bmz_birdset_efficientnetB1.BirdSetEfficientNetB1,
  'RanaSierraeCNN': bioacoustics_model_zoo.rana_sierrae_cnn.RanaSierraeCNN}
 ```
+
+## timing
+
+| Model | Inference Repr. | Total Time (s) | Files | Embeddings | Time/File (s) | Time/Embedding (s) |
+| :---- | :-------------- | :------------- | :---- | :--------- | :------------ | :----------------- |
+| Perch | TensorFlow      | 82.50          | 5     | 60         | 16.50         | 1.375              |
+| Perch | TFLite (Flex)   | 8.43           | 5     | 60         | 1.69          | 0.141              |
