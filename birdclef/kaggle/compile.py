@@ -125,37 +125,37 @@ def compile_classifier_head(compiled_root: Path, model_name: str, checkpoint: Pa
 
 
 @app.command()
-def benchmark_model(
+def benchmark_perch(
     test_audio: Path,
     compiled_root: Path,
     checkpoint: Path,
-    model_name: str,
     batch_size: int = 1,
 ):
-    """Benchmark any model from bioacoustics_model_zoo."""
+    """Benchmark the Perch model."""
     audio = [p.as_posix() for p in Path(test_audio).expanduser().glob("*.ogg")]
-    interpreter = load_tflite_interpreter(Path(compiled_root) / f"{model_name.lower()}.tflite")
-    model = bmz.list_models()[model_name]()
+    interpreter = load_tflite_interpreter(Path(compiled_root) / "perch.tflite")
+    perch = bmz.list_models()["Perch"]()
 
-    # initialize model for xla compilation
-    model.embed(audio[:1], batch_size=batch_size)
+    # initialize perch for xla compilation
+    perch.embed(audio[:1], batch_size=batch_size)
 
-    print(f"Running {model_name}")
+    print("Running Perch")
     with Timer() as timer:
-        res = model.embed(audio, batch_size=batch_size)
+        res = perch.embed(audio, batch_size=batch_size)
     print(f"data in shape {res.shape}")
-    print(f"{model_name} took {timer.elapsed:.2f} seconds for {len(audio)} files")
+    print(f"Perch took {timer.elapsed:.2f} seconds for {len(audio)} files")
     print(res.head())
 
-    print(f"Running {model_name} TFLite model...")
+    print("Running Perch TFLite model...")
     with Timer() as timer:
-        dataloader = model.predict_dataloader(audio, batch_size=batch_size)
-        res = run_tflite(interpreter, dataloader)
+        dataloader = perch.predict_dataloader(audio, batch_size=batch_size)
+        res = run_perch_tflite(interpreter, dataloader)
     print(res.head())
 
-    print(f"{model_name} TFLite took {timer.elapsed:.2f} seconds for {len(audio)} files")
+    print(f"Perch TFLite took {timer.elapsed:.2f} seconds for {len(audio)} files")
 
     # run the classification head
+    model_name = "Perch"
     checkpoint = Path(checkpoint).expanduser()
     label_to_index = json.loads(
         (checkpoint.parent.parent / "label_to_idx.json").read_text()
