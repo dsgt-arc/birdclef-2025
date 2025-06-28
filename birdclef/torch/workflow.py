@@ -10,19 +10,48 @@ from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from .data import BirdDataModule
 from .model import LinearClassifier
 import pytorch_lightning as pl
+import polars
 
 pl.seed_everything(42, workers=True)  # for reproducibility
 
 app = typer.Typer()
 
 
-def load_preprocess_data(input_path: str) -> pd.DataFrame:
+def load_mel2vec_data(input_path: str, model_name) -> pd.DataFrame:
+    if model_name == "mfcc":
+        col = "mfcc_stats"
+    else:
+        col = "word_vector"
+
+    # normally polars would be named pl, but we have naming conflict right now
+    df = polars.read_parquet(
+        f"{input_path}/**/*.parquet", hive_partitioning=True
+    ).select(
+        polars.col("file").str.split("/").list.get(-2).alias("species"),
+        polars.col(col).alias("embeddings"),
+    )
+    # filter out species with less than 2 samples
+    freq = df.group_by("species").count().filter(polars.col("count") >= 2)
+    pdf = (
+        df.join(freq, on="species", how="inner")
+        .select(polars.col("species").alias("species_name"), "embeddings")
+        .to_pandas()
+    )
+    print(f"DataFrame shape: {pdf.shape}")
+    print(f"Embedding size: {len(pdf['embeddings'].iloc[0])}")
+    return pdf
+
+
+def load_preprocess_data(input_path: str, model_name: str = "") -> pd.DataFrame:
+    if model_name in ["mel2vec", "mfcc"]:
+        return load_mel2vec_data(input_path, model_name)
+
     df = pd.read_parquet(input_path)
     # concatenate all embeddings into a single DataFrame
     df["species_name"] = df["file"].apply(
         lambda x: x.split("train_audio/")[1].split("/")[0]
     )
-    # train/test split requries y label to have at least 2 samples
+    # train/test split requires y label to have at least 2 samples
     # remove species with less than 2 samples
     species_count = df["species_name"].value_counts()
     valid_species = species_count[species_count >= 2].index
@@ -77,7 +106,7 @@ def main(
     batch_size: int = typer.Option(64, help="Batch size for training and validation"),
 ):
     # load and preprocess data
-    df = load_preprocess_data(input_path)
+    df = load_preprocess_data(input_path, model_name)
 
     # train/test split
     X_train, X_test, y_train, y_test = perform_train_test_split(df)

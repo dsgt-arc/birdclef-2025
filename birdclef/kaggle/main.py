@@ -8,14 +8,108 @@ import polars as pl
 import tqdm
 import typer
 from rich import print
-
+from opensoundscape import Audio
+from opensoundscape.spectrogram import MelSpectrogram
+import librosa
 from birdclef.config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
 import multiprocessing as mp
 from .compile import load_tflite_interpreter, run_perch_tflite, run_birdnet_tflite
+from birdclef.mel2vec.loaders import get_word_vectors, get_index
+import numpy as np
+import pandas as pd
 
 app = typer.Typer()
+
+
+def _process_mfcc(audio_path, index, word_vector, n_mfcc=20):
+    """Process a single audio file and return its mel spectrogram."""
+    audio = Audio.from_file(audio_path.as_posix(), sample_rate=32000)
+    spec = MelSpectrogram.from_audio(
+        audio,
+        n_mels=128,
+        fft_size=8192,
+        window_samples=8000,
+        overlap_fraction=0.5,
+        # dont want to double log things
+        dB_scale=False,
+    )
+    mfccs = librosa.feature.mfcc(
+        S=spec.spectrogram,
+        sr=spec.audio_sample_rate,
+        n_mfcc=n_mfcc,
+    )
+    # and now we return a pandas dataframe with the data
+    _, indices = index.search(mfccs.T, 1)
+    # indices is a (n_frames, 1) array
+    vectors = word_vector[indices.flatten()]
+
+    # and now we average the word vectors on 5 second intervals
+    # there must be a smarter way of doing this...
+    groups = {}
+    for i, t in enumerate(spec.times):
+        group = int(t // 5)
+        if group not in groups:
+            groups[group] = []
+        groups[group].append(vectors[i])
+
+    df = pd.DataFrame(
+        data=[np.mean(groups[i], axis=0) for i in sorted(groups.keys())],
+        # index should include file and end_time
+        index=pd.MultiIndex.from_frame(
+            pd.DataFrame(
+                {
+                    "file": [audio_path.as_posix()] * len(groups),
+                    "end_time": [(i + 1) * 5 for i in sorted(groups.keys())],
+                }
+            )
+        ),
+    )
+    return df
+
+
+def get_embed_func(model_name, model_path, clip_step, tflite_threads):
+    if model_name == "mel2vec":
+        index = get_index(model_path / "centroids.npy")
+        word_vector = get_word_vectors(model_path / "word2vec.wordvectors")
+
+        def embed_func(audio_file):
+            return _process_mfcc(audio_file, index, word_vector, n_mfcc=20)
+    else:
+        embedder = bmz.list_models()[model_name]()
+        if model_name in ["BirdNET", "Perch"]:
+            # look for tflite file next to the label_to_idx...
+            tflite_path = list(model_path.glob("*.tflite"))[0]
+            interpreter = load_tflite_interpreter(
+                tflite_path.as_posix(), num_threads=tflite_threads
+            )
+
+            def embed_func(audio_file):
+                if model_name == "BirdNET":
+                    return run_birdnet_tflite(
+                        interpreter,
+                        embedder.predict_dataloader(
+                            [audio_file.as_posix()], clip_step=clip_step
+                        ),
+                    )
+                else:
+                    return run_perch_tflite(
+                        interpreter,
+                        embedder.predict_dataloader(
+                            [audio_file.as_posix()], clip_step=clip_step
+                        ),
+                    )
+        else:
+
+            def embed_func(audio_file):
+                return embedder.embed(
+                    [audio_file.as_posix()],
+                    return_preds=False,
+                    clip_step=clip_step,
+                )
+
+    return embed_func
 
 
 def process_part(
@@ -31,29 +125,11 @@ def process_part(
     """Process a single part of the audio files."""
     # load the bmz model
     model_path = Path(model_path).expanduser()
-    embedder = bmz.list_models()[model_name]()
-    clip_step = model_config[model_name]["clip_step"]
-    if model_name in ["BirdNET", "Perch"]:
-        # look for tflite file next to the label_to_idx...
-        tflite_path = list(model_path.glob("*.tflite"))[0]
-        interpreter = load_tflite_interpreter(tflite_path.as_posix(), num_threads=tflite_threads)
-
-        def embed_func(audio_file):
-            if model_name == "BirdNET":
-                return run_birdnet_tflite(
-                    interpreter, embedder.predict_dataloader([audio_file.as_posix()], clip_step=clip_step)
-                )
-            else:
-                return run_perch_tflite(
-                    interpreter, embedder.predict_dataloader([audio_file.as_posix()], clip_step=clip_step)
-                )
-    else:
-        def embed_func(audio_file):
-            return embedder.embed(
-                [audio_file.as_posix()],
-                return_preds=False,
-                clip_step=clip_step,
-            )
+    # special casing for non-bmz models
+    clip_step = (
+        model_config[model_name]["clip_step"] if model_name in model_config else 5.0
+    )
+    embed_func = get_embed_func(model_name, model_path, clip_step, tflite_threads)
 
     # load the classification head
     # NOTE: we could optimize this by compiling into onnx
@@ -61,7 +137,11 @@ def process_part(
     checkpoint = list(model_path.glob("checkpoints/*.ckpt"))[0]
     classifier = LinearClassifier.load_from_checkpoint(
         checkpoint.as_posix(),
-        input_dim=model_config[model_name]["embed_size"],
+        input_dim=(
+            model_config[model_name]["embed_size"]
+            if model_name in model_config
+            else {"mel2vec": 384}[model_name]
+        ),
         num_classes=len(label_to_index),
     )
     classifier.eval()
@@ -80,7 +160,7 @@ def process_part(
     ):
         df = embed_func(audio_file)
         df = pl.from_pandas(df.reset_index())
-        
+
         if clip_step != 5.0:
             # aggregate predictions into 5-second intervals
             interval_length = 5
@@ -90,22 +170,22 @@ def process_part(
                 .alias("interval")
             )
             # average predictions
-            df = df.group_by(
-                ["file", "interval"]
-            ).agg(
-                pl.col("*").exclude(["file", "interval", "start_time", "end_time"]).mean()
+            df = df.group_by(["file", "interval"]).agg(
+                pl.col("*")
+                .exclude(["file", "interval", "start_time", "end_time"])
+                .mean()
             )
             # convert interval to end_time
             df = df.with_columns(
-                pl.col("interval")
-                .add(1)
-                .mul(interval_length)
-                .alias("end_time")
+                pl.col("interval").add(1).mul(interval_length).alias("end_time")
             ).drop("interval")
         else:
             # ensure same format as above case with aggregation
-            df = df.drop("start_time")
-        
+            try:
+                df = df.drop("start_time")
+            except Exception:
+                pass
+
         # generate the embedding vector
         df = df.select(
             "file",
