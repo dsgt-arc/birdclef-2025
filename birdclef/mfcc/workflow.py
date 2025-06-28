@@ -60,7 +60,7 @@ class ProcessPartition(luigi.Task, OptionsMixin):
             window_samples=8000,
             overlap_fraction=0.5,
             # dont want to double log things
-            dB_scale=False,
+            dB_scale=False if self.use_mfcc else True,
         )
         if self.use_mfcc:
             mfccs = librosa.feature.mfcc(

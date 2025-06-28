@@ -18,7 +18,7 @@ python -m birdclef.mfcc.workflow \
     $scratch_dir/2025v2/mfcc-soundscape \
     --num-workers ${NUM_WORKERS:-24} \
     --no-use-mfcc \
-    --n-mels=1024 \
+    --n-mels=768 \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)
 
 python -m birdclef.mfcc.workflow \
@@ -26,5 +26,5 @@ python -m birdclef.mfcc.workflow \
     $scratch_dir/2025v2/mfcc-train \
     --num-workers ${NUM_WORKERS:-24} \
     --no-use-mfcc \
-    --n-mels=1024 \
+    --n-mels=768 \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)
