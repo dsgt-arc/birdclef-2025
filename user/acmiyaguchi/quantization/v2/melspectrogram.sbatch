@@ -3,11 +3,12 @@
 #SBATCH --nodes=1 --ntasks=1 --cpus-per-task=24 --mem-per-cpu=6G
 #SBATCH --qos=embers --time=02:00:00 --output=logs/Report-melspectrogram-%j.log
 
-set -xeu
 
 hostname
 source ~/scratch/birdclef/.venv/bin/activate
 echo $PWD
+
+set -xeu
 
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
@@ -16,7 +17,7 @@ python -m birdclef.mfcc.workflow \
     $project_dir/raw/birdclef-2025/train_soundscapes \
     $scratch_dir/2025v2/mfcc-soundscape \
     --num-workers ${NUM_WORKERS:-24} \
-    --use-mfcc=False \
+    --no-use-mfcc \
     --n-mels=1024 \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)
 
@@ -24,6 +25,6 @@ python -m birdclef.mfcc.workflow \
     $project_dir/raw/birdclef-2025/train_audio \
     $scratch_dir/2025v2/mfcc-train \
     --num-workers ${NUM_WORKERS:-24} \
-    --use-mfcc=False \
+    --no-use-mfcc \
     --n-mels=1024 \
     $(if [ -n "${LIMIT:-}" ]; then echo "--limit $LIMIT"; fi)

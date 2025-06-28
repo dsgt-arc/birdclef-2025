@@ -55,7 +55,7 @@ class ProcessPartition(luigi.Task, OptionsMixin):
         audio = Audio.from_file(path.as_posix(), sample_rate=32000)
         spec = MelSpectrogram.from_audio(
             audio,
-            n_mels=128,
+            n_mels=self.n_mels,
             fft_size=8192,
             window_samples=8000,
             overlap_fraction=0.5,
@@ -137,6 +137,8 @@ class ProcessAudio(luigi.WrapperTask, OptionsMixin):
                 output_root=self.output_root,
                 num_partitions=self.num_partitions,
                 part=part,
+                use_mfcc=self.use_mfcc,
+                n_mels=self.n_mels,
             )
 
 
