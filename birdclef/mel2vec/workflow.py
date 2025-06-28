@@ -12,7 +12,7 @@ from gensim.models import Word2Vec
 from pacmap import PaCMAP
 from pyspark.sql import functions as F
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, f1_score
+from sklearn.metrics import roc_auc_score, f1_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
@@ -505,6 +505,9 @@ class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
             "f1_macro_score": f1_score(y_test, y_pred, average="macro"),
             "f1_micro_score": f1_score(y_test, y_pred, average="micro"),
             "accuracy": model.score(X_test, y_test),
+            "roc_auc": roc_auc_score(
+                y_test, model.predict_proba(X_test), multi_class="ovr"
+            ),
         }
         output_root = Path(self.output()["scores"].path).parent
         output_root.mkdir(parents=True, exist_ok=True)
