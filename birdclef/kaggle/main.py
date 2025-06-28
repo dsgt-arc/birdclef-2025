@@ -26,40 +26,41 @@ import pandas as pd
 app = typer.Typer()
 
 
-def _process_mfcc(audio_path, index, word_vector, n_mfcc=20):
-    """Process a single audio file and return its mel spectrogram."""
+def _process_mel2vec(
+    audio_path, index, word_vector, *, n_mels=128, use_mfcc=True, n_mfcc=20
+):
+    """Process a single audio file for mel2vec (v1 or v2)."""
     audio = Audio.from_file(audio_path.as_posix(), sample_rate=32000)
     spec = MelSpectrogram.from_audio(
         audio,
-        n_mels=128,
+        n_mels=n_mels,
         fft_size=8192,
         window_samples=8000,
         overlap_fraction=0.5,
-        # dont want to double log things
-        dB_scale=False,
+        dB_scale=False if use_mfcc else True,
     )
-    mfccs = librosa.feature.mfcc(
-        S=spec.spectrogram,
-        sr=spec.audio_sample_rate,
-        n_mfcc=n_mfcc,
-    )
-    # and now we return a pandas dataframe with the data
-    _, indices = index.search(mfccs.T, 1)
-    # indices is a (n_frames, 1) array
+    if use_mfcc:
+        features = librosa.feature.mfcc(
+            S=spec.spectrogram,
+            sr=spec.audio_sample_rate,
+            n_mfcc=n_mfcc,
+        )
+        features = features.T  # (n_frames, n_mfcc)
+    else:
+        # Normalize each frame of the spectrogram
+        S = spec.spectrogram.astype(np.float32)
+        S = S / (np.linalg.norm(S, axis=0, keepdims=True) + 1e-8)
+        features = S.T  # (n_frames, n_mels)
+    _, indices = index.search(features, 1)
     vectors = word_vector[indices.flatten()]
-
-    # and now we average the word vectors on 5 second intervals
-    # there must be a smarter way of doing this...
     groups = {}
     for i, t in enumerate(spec.times):
         group = int(t // 5)
         if group not in groups:
             groups[group] = []
         groups[group].append(vectors[i])
-
     df = pd.DataFrame(
         data=[np.mean(groups[i], axis=0) for i in sorted(groups.keys())],
-        # index should include file and end_time
         index=pd.MultiIndex.from_frame(
             pd.DataFrame(
                 {
@@ -73,12 +74,23 @@ def _process_mfcc(audio_path, index, word_vector, n_mfcc=20):
 
 
 def get_embed_func(model_name, model_path, clip_step, tflite_threads):
-    if model_name == "mel2vec":
+    if model_name.startswith("mel2vec"):
         index = get_index(model_path / "centroids.npy")
         word_vector = get_word_vectors(model_path / "word2vec.wordvectors")
+        if model_name in ["mel2vec", "mel2vec_v1"]:
 
-        def embed_func(audio_file):
-            return _process_mfcc(audio_file, index, word_vector, n_mfcc=20)
+            def embed_func(audio_file):
+                return _process_mel2vec(
+                    audio_file, index, word_vector, n_mels=128, use_mfcc=True, n_mfcc=20
+                )
+        elif model_name == "mel2vec_v2":
+
+            def embed_func(audio_file):
+                return _process_mel2vec(
+                    audio_file, index, word_vector, n_mels=768, use_mfcc=False
+                )
+        else:
+            raise ValueError(f"Unknown mel2vec variant: {model_name}")
     else:
         if model_name == "BirdSetEfficientNetB1":
             embedder = BirdSetEfficientNetB1Offline(model_path)

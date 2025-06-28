@@ -37,6 +37,10 @@ class OptionsMixin:
 class BuildTokenizer(luigi.Task, OptionsMixin):
     input_dim = luigi.IntParameter(default=20)
     n_clusters = luigi.IntParameter(default=2**14 - 1)
+    feature_column = luigi.Parameter(
+        default="mfcc",
+        description="The feature column to use for clustering",
+    )
 
     prefix = "tokenizer"
 
@@ -53,14 +57,25 @@ class BuildTokenizer(luigi.Task, OptionsMixin):
             pl.scan_parquet(self.input_root)
             .filter(pl.col("part") < 80)
             .sort("file", "timestamp")
-            .select("file", "timestamp", "mfcc")
+            .select("file", "timestamp", self.feature_column)
         )
         return df
 
     def _prepare_matrix(self, df):
-        """Prepare the matrix of MFCC features from the DataFrame."""
-        X = np.stack(df.select("mfcc").collect().get_column("mfcc").to_numpy())
+        """Prepare the matrix of spectrogram features from the DataFrame.
+
+        The feature column can be MFCC or melspectrogram vectors.
+        """
+        X = np.stack(
+            df.select(self.feature_column)
+            .collect()
+            .get_column(self.feature_column)
+            .to_numpy()
+        )
         X = X.astype(np.float32)
+        # perform per-sample l2 normalization with small episilon for numerical stability
+        # NOTE: this makes the tokenizer incompatible with previous versions
+        X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
         return X
 
     def _save_centroids(self, cluster_faiss):
@@ -71,6 +86,7 @@ class BuildTokenizer(luigi.Task, OptionsMixin):
 
     def run(self):
         # use the first 80% of the data for training
+        # The feature column can be MFCC or melspectrogram vectors.
         df = self._load_data()
         X = self._prepare_matrix(df)
         cluster_faiss = faiss.Kmeans(
@@ -104,6 +120,7 @@ class BuildPCATokenizer(BuildTokenizer):
 
     def run(self):
         # use the first 80% of the data for training
+        # The feature column can be MFCC or melspectrogram vectors.
         df = self._load_data()
         X = self._prepare_matrix(df)
 
@@ -138,11 +155,18 @@ class Word2VecOptionsMixin(OptionsMixin):
         default=2**14 - 1,
         description="Number of clusters to use for the tokenizer",
     )
+    feature_column = luigi.Parameter(
+        default="mfcc",
+        description="The feature column to use for training the Word2Vec model",
+    )
     step = luigi.IntParameter(default=10, description="Number of epochs per checkpoint")
 
 
 class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
-    """Task to train a Word2Vec model on a specific set of audio files."""
+    """Task to train a Word2Vec model on a specific set of audio files.
+
+    The feature column can be MFCC or melspectrogram vectors.
+    """
 
     def requires(self):
         reqs = {
@@ -211,13 +235,20 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             .sort("file", "timestamp")
         )
 
-        X = np.stack(df.select("mfcc").collect().get_column("mfcc").to_numpy())
+        X = np.stack(
+            df.select(self.feature_column)
+            .collect()
+            .get_column(self.feature_column)
+            .to_numpy()
+        )
+        # Normalize before PCA and FAISS search
+        X = X.astype(np.float32)
+        X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
         if self.tokenizer == "tokenizer_pca":
             pca = faiss.read_VectorTransform(
                 self.requires()["tokenizer"].output()["pca"].path
             )
             X = pca.apply(X)
-        X = X.astype(np.float32)
         _, indices = index.search(X, 1)
         ids = pl.Series("token", indices.flatten())
         token_df = df.with_columns(ids)
@@ -294,8 +325,9 @@ class EmbedWord2VecOptionsMixin(Word2VecOptionsMixin):
 class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
     """Task to embed audio files using the trained Word2Vec model.
 
+    The feature column can be MFCC or melspectrogram vectors.
     We should be using the soundscape dataset to train the word2vec model.
-    We'll want to embed the actual mfccs on the training dataset though.
+    We'll want to embed the actual feature vectors on the training dataset though.
     """
 
     def output(self):
@@ -359,7 +391,7 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
                 index_path: str = index_path,
                 pca_path: str | None = pca_path,
             ) -> list:
-                # convert mfcc to word vectors
+                # convert feature vector (MFCC or melspectrogram) to word vectors
                 X = np.array(mfcc).reshape(1, -1)
                 if self.tokenizer == "tokenizer_pca":
                     # unfortunately we can't serialize PCA so reread it from disk every time,
@@ -372,6 +404,7 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
 
             @F.udf(returnType="array<float>")
             def get_mfcc_stats(mfcc: list) -> list:
+                # Compute mean and std of feature vectors (MFCC or melspectrogram)
                 X = np.stack(mfcc)
                 return X.mean(axis=0).tolist() + X.std(axis=0).tolist()
 
@@ -393,14 +426,14 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
 
             (
                 df.withColumn("start_time", get_start_time(F.col("timestamp")))
-                .withColumn("word_vector", mfcc_to_wv(F.col("mfcc")))
+                .withColumn("word_vector", mfcc_to_wv(F.col(self.feature_column)))
                 .groupBy("file", "start_time")
                 .agg(
-                    F.collect_list("mfcc").alias("mfcc"),
+                    F.collect_list(self.feature_column).alias(self.feature_column),
                     F.collect_list("word_vector").alias("word_vector"),
                 )
                 .where(F.col("start_time") >= 0)
-                .withColumn("mfcc_stats", get_mfcc_stats(F.col("mfcc")))
+                .withColumn("mfcc_stats", get_mfcc_stats(F.col(self.feature_column)))
                 .withColumn("word_vector", avg_vector(F.col("word_vector")))
                 .select("file", "start_time", "mfcc_stats", "word_vector")
                 .repartition(20)
@@ -493,50 +526,6 @@ class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
         plt.savefig(self.output()["plot"].path)
 
 
-# @app.command()
-# def run(
-#     train_root: str,
-#     soundscape_root: str,
-#     output_root: str,
-#     gensim_workers: int = 8,
-#     luigi_workers: int = 8,
-# ):
-#     """Run the tokenizer building process.
-
-#     Note that the inputs for train and soundscape roots as of writing of this comment
-#     is for these to be the pre-computed MFCCs, and not the raw audio.
-#     """
-#     luigi.build(
-#         [
-#             EmbedWord2VecTask(
-#                 input_root=input_root,
-#                 soundscape_root=soundscape_root,
-#                 output_root=output_root,
-#                 output_prefix=output_prefix,
-#                 workers=gensim_workers,
-#                 tokenizer=tokenizer,
-#                 **params,
-#             )
-#             for tokenizer in ["tokenizer", "tokenizer_pca"]
-#             for input_root, output_prefix in [
-#                 (train_root, "train"),
-#                 (soundscape_root, "soundscape"),
-#             ]
-#             for params in [
-#                 {
-#                     "epochs": 100,
-#                     "vector_size": 256,
-#                     "window": 80,
-#                     "ns_exponent": 0.75,
-#                     "sample": 1e-4,
-#                 }
-#             ]
-#         ],
-#         workers=luigi_workers,
-#         local_scheduler=True,
-#     )
-
-
 @app.command()
 def tune_tokenizer(
     train_root: str,
@@ -548,7 +537,7 @@ def tune_tokenizer(
     """Run the tokenizer building process.
 
     Note that the inputs for train and soundscape roots as of writing of this comment
-    is for these to be the pre-computed MFCCs, and not the raw audio.
+    is for these to be the pre-computed MFCC or melspectrogram vectors, and not the raw audio.
     """
     luigi.build(
         [
