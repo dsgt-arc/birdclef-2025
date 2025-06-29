@@ -30,3 +30,74 @@ Clustering 3729494 points in 20D to 16383 clusters, redo 1 times, 25 iterations
   Iteration 23 (44.56 s, search 43.47 s): objective=0.0069571 imbalance=1.302 nsplit=0
   Iteration 24 (46.41 s, search 45.28 s): objective=0.00690363 imbalance=1.306 nsplit=0
 ```
+
+```
+Sampling a subset of 1048576 / 3729494 for training
+Clustering 1048576 points in 768D to 4096 clusters, redo 1 times, 25 iterations
+  Preprocessing in 4.43 s
+  Iteration 0 (52.12 s, search 51.96 s): objective=4467.69 imbalance=2.565 nsplit=0
+  Iteration 1 (103.87 s, search 103.60 s): objective=2721.62 imbalance=1.579 nsplit=0
+  Iteration 2 (155.78 s, search 155.43 s): objective=2625.24 imbalance=1.466 nsplit=0
+  Iteration 3 (207.44 s, search 207.00 s): objective=2581.85 imbalance=1.430 nsplit=0
+  Iteration 4 (259.05 s, search 258.52 s): objective=2557.24 imbalance=1.415 nsplit=0
+  Iteration 5 (311.46 s, search 310.85 s): objective=2541.58 imbalance=1.409 nsplit=0
+  Iteration 6 (363.09 s, search 362.40 s): objective=2531.29 imbalance=1.406 nsplit=0
+  Iteration 7 (414.93 s, search 414.15 s): objective=2523.99 imbalance=1.405 nsplit=0
+  Iteration 8 (466.66 s, search 465.80 s): objective=2518.57 imbalance=1.406 nsplit=0
+  Iteration 9 (518.19 s, search 517.24 s): objective=2514.27 imbalance=1.408 nsplit=0
+  Iteration 10 (569.91 s, search 568.86 s): objective=2510.8 imbalance=1.409 nsplit=0
+  Iteration 11 (621.78 s, search 620.64 s): objective=2507.98 imbalance=1.412 nsplit=0
+  Iteration 12 (673.34 s, search 672.12 s): objective=2505.63 imbalance=1.414 nsplit=0
+  Iteration 13 (724.93 s, search 723.62 s): objective=2503.8 imbalance=1.415 nsplit=0
+  Iteration 14 (776.61 s, search 775.22 s): objective=2502.22 imbalance=1.417 nsplit=0
+  Iteration 15 (828.38 s, search 826.91 s): objective=2500.81 imbalance=1.419 nsplit=0
+  Iteration 16 (880.49 s, search 878.93 s): objective=2499.52 imbalance=1.420 nsplit=0
+  Iteration 17 (932.14 s, search 930.49 s): objective=2498.43 imbalance=1.422 nsplit=0
+  Iteration 18 (983.88 s, search 982.15 s): objective=2497.49 imbalance=1.424 nsplit=0
+  Iteration 19 (1035.56 s, search 1033.75 s): objective=2496.58 imbalance=1.425 nsplit=0
+  Iteration 20 (1087.19 s, search 1085.30 s): objective=2495.84 imbalance=1.426 nsplit=0
+  Iteration 21 (1138.92 s, search 1136.95 s): objective=2495.2 imbalance=1.428 nsplit=0
+  Iteration 22 (1191.17 s, search 1189.11 s): objective=2494.69 imbalance=1.429 nsplit=0
+  Iteration 23 (1242.80 s, search 1240.66 s): objective=2494.23 imbalance=1.429 nsplit=0
+  Iteration 24 (1294.51 s, search 1292.28 s): objective=2493.78 imbalance=1.431 nsplit=0
+  ```
+
+
+## intuition of imbalance factor
+
+The `imbalance` factor in the Faiss K-Means log gives you intuition about the distribution of your data points across the clusters.
+
+In simple terms, it measures how much larger the biggest cluster is compared to the average cluster size.
+
+Here is a scale to help you build intuition:
+
+---
+
+### Imbalance = 1.0: Perfectly Balanced
+
+* **What it means:** Every single cluster has the exact same number of data points.
+* **Interpretation:** This is a theoretical ideal and is practically impossible to achieve with real-world data. If you see this, it likely means you are using synthetic, perfectly uniform data. It's not a realistic goal.
+
+---
+
+### Imbalance = 1.2 – 1.8: Healthy and Expected Imbalance
+
+* **What it means:** The largest cluster is about 20% to 80% larger than the average cluster size.
+* **Interpretation:** This is the most common and healthiest range for real-world datasets. It indicates that your data has a natural structure where some patterns (e.g., common background sounds or frequent bird calls) appear more often than others, leading to larger clusters. **Your results of ~1.3 and ~1.43 fall squarely in this range, which is a good sign.**
+
+---
+
+### Imbalance = 2.0 – 4.0: Moderately Imbalanced
+
+* **What it means:** The largest cluster is two to four times larger than the average.
+* **Interpretation:** This is still often acceptable, but it tells you that your data distribution is skewed. You likely have a few very dominant types of sounds that form dense, large clusters, while other sounds are much rarer. For example, a "background hiss" token might form one very large cluster. This isn't necessarily a problem, but it's an important characteristic of your data to be aware of.
+
+---
+
+### Imbalance > 5.0: Highly Imbalanced (Potential Red Flag)
+
+* **What it means:** The largest cluster is more than five times the average size.
+* **Interpretation:** This warrants investigation. It can indicate a few things:
+    * **A "Trash" Cluster:** A single, massive cluster might be acting as a "catch-all" for many dissimilar points because the other centroids are too specialized.
+    * **Extreme Data Skew:** Your dataset might be overwhelmingly dominated by one type of sound (e.g., if 90% of your audio was silence or wind noise).
+    * **Poor `K` Choice:** You might be using too few clusters (`K`) for a very diverse dataset, forcing many unrelated sounds into one giant group.

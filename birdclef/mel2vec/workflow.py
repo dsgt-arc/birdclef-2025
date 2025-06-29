@@ -34,14 +34,19 @@ class OptionsMixin:
     )
 
 
-class BuildTokenizer(luigi.Task, OptionsMixin):
-    input_dim = luigi.IntParameter(default=20)
+class BuildTokenizerOptionsMixin:
+    input_dim = luigi.IntParameter(default=768)
     n_clusters = luigi.IntParameter(default=2**14 - 1)
     feature_column = luigi.Parameter(
         default="mfcc",
         description="The feature column to use for clustering",
     )
+    kmeans_niter = luigi.IntParameter(
+        default=10, description="Number of KMeans iterations"
+    )
 
+
+class BuildTokenizer(luigi.Task, OptionsMixin, BuildTokenizerOptionsMixin):
     prefix = "tokenizer"
 
     def output(self):
@@ -92,14 +97,14 @@ class BuildTokenizer(luigi.Task, OptionsMixin):
         cluster_faiss = faiss.Kmeans(
             d=self.input_dim,
             k=self.n_clusters,
-            niter=25,
+            niter=self.kmeans_niter,
             verbose=True,
         )
         cluster_faiss.train(X)
         self._save_centroids(cluster_faiss)
 
 
-class BuildPCATokenizer(BuildTokenizer):
+class BuildPCATokenizer(BuildTokenizer, BuildTokenizerOptionsMixin):
     prefix = "tokenizer_pca"
 
     def output(self):
@@ -130,7 +135,7 @@ class BuildPCATokenizer(BuildTokenizer):
         cluster_faiss = faiss.Kmeans(
             d=self.input_dim,
             k=self.n_clusters,
-            niter=25,
+            niter=self.kmeans_niter,
             verbose=True,
         )
         cluster_faiss.train(pca.apply(X))
@@ -139,7 +144,7 @@ class BuildPCATokenizer(BuildTokenizer):
         self._save_pca(pca)
 
 
-class Word2VecOptionsMixin(OptionsMixin):
+class Word2VecOptionsMixin(OptionsMixin, BuildTokenizerOptionsMixin):
     vector_size = luigi.IntParameter(default=256)
     window = luigi.IntParameter(default=40)
     ns_exponent = luigi.FloatParameter(default=0.75)
@@ -150,14 +155,6 @@ class Word2VecOptionsMixin(OptionsMixin):
         default="tokenizer",
         choices=["tokenizer", "tokenizer_pca"],
         description="The tokenizer to use for training the Word2Vec model",
-    )
-    tokenizer_n_clusters = luigi.IntParameter(
-        default=2**14 - 1,
-        description="Number of clusters to use for the tokenizer",
-    )
-    feature_column = luigi.Parameter(
-        default="mfcc",
-        description="The feature column to use for training the Word2Vec model",
     )
     step = luigi.IntParameter(default=10, description="Number of epochs per checkpoint")
 
@@ -173,12 +170,14 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             "tokenizer": BuildTokenizer(
                 input_root=self.input_root,
                 output_root=self.output_root,
-                n_clusters=self.tokenizer_n_clusters,
+                n_clusters=self.n_clusters,
+                kmeans_niter=self.kmeans_niter,
             ),
             "tokenizer_pca": BuildPCATokenizer(
                 input_root=self.input_root,
                 output_root=self.output_root,
-                n_clusters=self.tokenizer_n_clusters,
+                n_clusters=self.n_clusters,
+                kmeans_niter=self.kmeans_niter,
             ),
         }
         # recursive dependency for checkpointing.
@@ -198,7 +197,9 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             f"{k}={v}"
             for k, v in [
                 ("tokenizer", self.tokenizer),
-                ("tokenizer_n_clusters", self.tokenizer_n_clusters),
+                # NOTE: this is no longer backwards compatible, and it also means that
+                # the first job with n_iters is the first one we get.
+                ("n_clusters", self.n_clusters),
                 ("vector_size", self.vector_size),
                 ("window", self.window),
                 ("ns_exponent", self.ns_exponent),
@@ -335,7 +336,7 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
             f"{k}={v}"
             for k, v in [
                 ("tokenizer", self.tokenizer),
-                ("tokenizer_n_clusters", self.tokenizer_n_clusters),
+                ("tokenizer_n_clusters", self.n_clusters),
                 ("vector_size", self.vector_size),
                 ("window", self.window),
                 ("ns_exponent", self.ns_exponent),
@@ -358,7 +359,8 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
             sample=self.sample,
             workers=self.workers,
             tokenizer=self.tokenizer,
-            tokenizer_n_clusters=self.tokenizer_n_clusters,
+            n_clusters=self.n_clusters,
+            kmeans_niter=self.kmeans_niter,
         )
         return {
             "word2vec": word2vec,
@@ -400,7 +402,12 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
                 index = loaders.get_index(index_path)
                 word_vectors = loaders.get_word_vectors(wv_path)
                 _, indices = index.search(X, 1)
-                return word_vectors[indices[0][0]].tolist()
+                token = indices[0][0]
+                if token == -1:
+                    # if the token is not found, return a zero vector
+                    return [0.0] * len(word_vectors[0])
+                # return the word vector for the token
+                return word_vectors[token].tolist()
 
             @F.udf(returnType="array<float>")
             def get_mfcc_stats(mfcc: list) -> list:
@@ -456,12 +463,13 @@ class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
                 output_prefix="train",
                 filter_species=self.filter_species,
                 tokenizer=self.tokenizer,
-                tokenizer_n_clusters=self.tokenizer_n_clusters,
+                n_clusters=self.n_clusters,
                 vector_size=self.vector_size,
                 window=self.window,
                 ns_exponent=self.ns_exponent,
                 sample=self.sample,
                 epochs=self.epochs,
+                kmeans_niter=self.kmeans_niter,
             ),
         }
 
@@ -551,13 +559,14 @@ def tune_tokenizer(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
+                kmeans_niter=5,
                 **params,
             )
             for tokenizer in ["tokenizer"]
             # 4k, 8k, 16k, 32k, 64k
-            for tokenizer_n_clusters in [2**12, 2**13, 2**14 - 1, 2**15 - 1, 2**16 - 1]
+            for n_clusters in [2**12, 2**13, 2**14 - 1, 2**15 - 1, 2**16 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -583,6 +592,23 @@ def tune_w2v(
     luigi_workers: int = 8,
 ):
     """Tune the Word2Vec model parameters."""
+    baseline = {
+        "vector_size": 256,
+        "window": 80,
+        "ns_exponent": 0.75,
+        "sample": 1e-4,
+    }
+    experiments = [baseline]
+    for vector_size in [128, 384, 512, 1028]:
+        experiments.append({**baseline, "vector_size": vector_size})
+    for window in [40, 120]:
+        experiments.append({**baseline, "window": window})
+    for ns_exponent in [0.0, -0.5]:
+        experiments.append({**baseline, "ns_exponent": ns_exponent})
+    for sample in [1e-5, 1e-6]:
+        experiments.append({**baseline, "sample": sample})
+    # Combination experiment: Optimized for rare species
+    experiments.append({**baseline, "window": 120, "ns_exponent": -0.5})
     luigi.build(
         [
             EvalWord2VecTask(
@@ -592,94 +618,16 @@ def tune_w2v(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=20,
+                kmeans_niter=5,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
-            for params in [
-                # Baseline Configuration
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                # Varying Vector Size
-                {
-                    "vector_size": 128,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 384,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 512,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 1028,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                # Varying Window Size
-                {
-                    "vector_size": 256,
-                    "window": 40,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 256,
-                    "window": 120,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                # Varying Negative Sampling Exponent (Key for imbalance)
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.0,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": -0.5,
-                    "sample": 1e-4,
-                },
-                # Varying Downsampling Rate
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-5,
-                },
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-6,
-                },
-                # Combination Experiment: Optimized for Rare Species
-                {
-                    "vector_size": 256,
-                    "window": 120,
-                    "ns_exponent": -0.5,
-                    "sample": 1e-4,
-                },
-            ]
+            for params in experiments
         ],
         workers=luigi_workers,
         local_scheduler=True,
@@ -704,13 +652,13 @@ def tune_ns(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=20,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -766,13 +714,13 @@ def evaluate_strawman(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=epochs,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -811,13 +759,13 @@ def evaluate_v1(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=epochs,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -837,11 +785,11 @@ def evaluate_v1(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [
                 (train_root, "train_all"),
                 (soundscape_root, "soundscape_all"),

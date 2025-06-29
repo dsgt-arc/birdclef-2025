@@ -52,6 +52,16 @@ def _process_mel2vec(
         S = S / (np.linalg.norm(S, axis=0, keepdims=True) + 1e-8)
         features = S.T  # (n_frames, n_mels)
     _, indices = index.search(features, 1)
+    tokens = [idx[0] for idx in indices]
+    vectors = []
+    token_size = len(word_vector[0])
+    for token in tokens:
+        if token == -1:
+            # if the token is not found, return a zero vector
+            vectors.append(np.zeros(token_size, dtype=np.float32))
+        else:
+            # return the word vector for the token
+            vectors.append(word_vector[token])
     vectors = word_vector[indices.flatten()]
     groups = {}
     for i, t in enumerate(spec.times):
