@@ -24,3 +24,16 @@ def get_word_vectors(path):
 def get_pca(path):
     """Get the PCA model from the tokenizer."""
     return faiss.read_VectorTransform(str(path))
+
+
+def tokenize(S, index, pca=None):
+    """Tokenize the input string using the FAISS index and optional PCA.
+    S is the original 2d array of features (e.g., MFCC or melspectrogram).
+    """
+
+    X = S.astype(np.float32)
+    if pca is not None:
+        X = pca.apply(X)
+    X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
+    _, indices = index.search(X, 1)
+    return indices.flatten().tolist()

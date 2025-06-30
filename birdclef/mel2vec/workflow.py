@@ -44,6 +44,10 @@ class BuildTokenizerOptionsMixin:
     kmeans_niter = luigi.IntParameter(
         default=10, description="Number of KMeans iterations"
     )
+    pca_dim = luigi.IntParameter(
+        default=128,
+        description="Dimension of the PCA transformation to apply before clustering",
+    )
 
 
 class BuildTokenizer(luigi.Task, OptionsMixin, BuildTokenizerOptionsMixin):
@@ -77,9 +81,13 @@ class BuildTokenizer(luigi.Task, OptionsMixin, BuildTokenizerOptionsMixin):
             .get_column(self.feature_column)
             .to_numpy()
         )
-        X = X.astype(np.float32)
+        return X
+
+    def _normalize_matrix(self, X):
+        """Normalize the matrix of spectrogram features."""
         # perform per-sample l2 normalization with small episilon for numerical stability
         # NOTE: this makes the tokenizer incompatible with previous versions
+        X = X.astype(np.float32)
         X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
         return X
 
@@ -94,6 +102,7 @@ class BuildTokenizer(luigi.Task, OptionsMixin, BuildTokenizerOptionsMixin):
         # The feature column can be MFCC or melspectrogram vectors.
         df = self._load_data()
         X = self._prepare_matrix(df)
+        X = self._normalize_matrix(X)
         cluster_faiss = faiss.Kmeans(
             d=self.input_dim,
             k=self.n_clusters,
@@ -124,21 +133,20 @@ class BuildPCATokenizer(BuildTokenizer, BuildTokenizerOptionsMixin):
         faiss.write_VectorTransform(pca, output.as_posix())
 
     def run(self):
-        # use the first 80% of the data for training
-        # The feature column can be MFCC or melspectrogram vectors.
         df = self._load_data()
         X = self._prepare_matrix(df)
-
-        pca = faiss.PCAMatrix(self.input_dim, self.input_dim)
+        pca = faiss.PCAMatrix(self.input_dim, self.pca_dim)
         pca.train(X)
 
         cluster_faiss = faiss.Kmeans(
-            d=self.input_dim,
+            d=self.pca_dim,
             k=self.n_clusters,
             niter=self.kmeans_niter,
             verbose=True,
         )
-        cluster_faiss.train(pca.apply(X))
+        X = pca.apply(X)
+        X = self._normalize_matrix(X)
+        cluster_faiss.train(X)
 
         self._save_centroids(cluster_faiss)
         self._save_pca(pca)
@@ -220,44 +228,36 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
         }
 
     def token_generator(self, df, limit=-1):
+        # Prepare centroids and index for tokenization
+        index = loaders.get_index(
+            self.requires()["tokenizer"].output()["centroids"].path
+        )
+        if self.tokenizer == "tokenizer_pca":
+            pca = loaders.get_pca(self.requires()["tokenizer"].output()["pca"].path)
+        else:
+            pca = None
+
         if limit > 0:
             df = df.filter(pl.col("part") < limit)
+        # Use lazy evaluation: process each partition/file as needed
         for sub in df.collect().partition_by("file"):
-            yield sub.sort("timestamp").get_column("token").to_list()
+            features = np.stack(
+                sub.sort("timestamp").get_column(self.feature_column).to_numpy()
+            )
+            yield loaders.tokenize(features, index, pca)
 
     def run(self):
-        centroids = np.load(self.requires()["tokenizer"].output()["centroids"].path)
-        index = faiss.IndexFlatL2(centroids.shape[1])
-        index.add(centroids)
-
         df = (
             pl.scan_parquet(self.input_root)
             .filter(pl.col("part") < 80)
             .sort("file", "timestamp")
         )
 
-        X = np.stack(
-            df.select(self.feature_column)
-            .collect()
-            .get_column(self.feature_column)
-            .to_numpy()
-        )
-        # Normalize before PCA and FAISS search
-        X = X.astype(np.float32)
-        X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
-        if self.tokenizer == "tokenizer_pca":
-            pca = faiss.read_VectorTransform(
-                self.requires()["tokenizer"].output()["pca"].path
-            )
-            X = pca.apply(X)
-        _, indices = index.search(X, 1)
-        ids = pl.Series("token", indices.flatten())
-        token_df = df.with_columns(ids)
-
+        # Remove eager tokenization, use token_generator for lazy tokenization
         with Timer() as t:
             if "prev" not in self.requires():
                 model = Word2Vec(
-                    sentences=list(self.token_generator(token_df)),
+                    sentences=list(self.token_generator(df)),
                     epochs=self.step,
                     vector_size=self.vector_size,
                     min_count=1,
@@ -275,7 +275,7 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
                 # continue training from previous checkpoint
                 model = Word2Vec.load(self.requires()["prev"].output()["model"].path)
                 model.train(
-                    list(self.token_generator(token_df)),
+                    list(self.token_generator(df)),
                     total_examples=model.corpus_count,
                     epochs=self.step,
                     start_alpha=model.alpha,
@@ -395,15 +395,12 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
             ) -> list:
                 # convert feature vector (MFCC or melspectrogram) to word vectors
                 X = np.array(mfcc).reshape(1, -1)
-                if self.tokenizer == "tokenizer_pca":
-                    # unfortunately we can't serialize PCA so reread it from disk every time,
-                    pca = loaders.get_pca(pca_path)
-                    X = pca.apply(X)
+
                 index = loaders.get_index(index_path)
+                pca = loaders.get_pca(pca_path) if pca_path else None
+                token = loaders.tokenize(X, index, pca)[0]
                 word_vectors = loaders.get_word_vectors(wv_path)
-                _, indices = index.search(X, 1)
-                token = indices[0][0]
-                if token == -1:
+                if token not in word_vectors:
                     # if the token is not found, return a zero vector
                     return [0.0] * len(word_vectors[0])
                 # return the word vector for the token
@@ -561,12 +558,11 @@ def tune_tokenizer(
                 tokenizer=tokenizer,
                 n_clusters=n_clusters,
                 filter_species=colombia_species_list,
-                kmeans_niter=5,
                 **params,
             )
-            for tokenizer in ["tokenizer"]
-            # 4k, 8k, 16k, 32k, 64k
-            for n_clusters in [2**12, 2**13, 2**14 - 1, 2**15 - 1, 2**16 - 1]
+            for tokenizer in ["tokenizer", "tokenizer_pca"]
+            # 4k, 8k, 16k, 32k
+            for n_clusters in [2**12, 2**13, 2**14 - 1, 2**15 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -593,19 +589,19 @@ def tune_w2v(
 ):
     """Tune the Word2Vec model parameters."""
     baseline = {
-        "vector_size": 256,
+        "vector_size": 384,
         "window": 80,
-        "ns_exponent": 0.75,
-        "sample": 1e-4,
+        "ns_exponent": 1.5,
+        "sample": 1e-5,
     }
     experiments = [baseline]
-    for vector_size in [128, 384, 512, 1028]:
+    for vector_size in [128, 256, 512, 1028]:
         experiments.append({**baseline, "vector_size": vector_size})
     for window in [40, 120]:
         experiments.append({**baseline, "window": window})
     for ns_exponent in [0.0, -0.5]:
         experiments.append({**baseline, "ns_exponent": ns_exponent})
-    for sample in [1e-5, 1e-6]:
+    for sample in [1e-4, 1e-6]:
         experiments.append({**baseline, "sample": sample})
     # Combination experiment: Optimized for rare species
     experiments.append({**baseline, "window": 120, "ns_exponent": -0.5})
@@ -621,7 +617,7 @@ def tune_w2v(
                 n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=20,
-                kmeans_niter=5,
+                kmeans_niter=10,
                 **params,
             )
             for tokenizer in ["tokenizer"]
