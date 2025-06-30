@@ -620,7 +620,7 @@ def tune_w2v(
                 kmeans_niter=10,
                 **params,
             )
-            for tokenizer in ["tokenizer"]
+            for tokenizer in ["tokenizer", "tokenizer_pca"]
             for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in experiments
