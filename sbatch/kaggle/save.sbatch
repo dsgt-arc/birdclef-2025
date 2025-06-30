@@ -13,5 +13,5 @@ set -x
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 
-python -m birdclef.kaggle.compile compile-model \
+python -m birdclef.kaggle.compile save-model \
     $project_dir/models/2025/v1/$1/torch-linear-v1 $1

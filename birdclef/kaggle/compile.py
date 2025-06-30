@@ -12,6 +12,7 @@ import openvino as ov
 import json
 import torch
 import requests
+from transformers import AutoModel, AutoConfig
 
 app = typer.Typer()
 
@@ -76,21 +77,33 @@ def compile_perch(compiled_root: Path):
         f.write(tflite_model)
 
 
-def save_birdnet(compiled_root: Path):
+def save_birdnet(save_root: Path):
     url = "https://github.com/kahst/BirdNET-Analyzer/raw/v1.3.1/checkpoints/V2.4/BirdNET_GLOBAL_6K_V2.4_Model_FP16.tflite"
     response = requests.get(url)
-    compiled_root = Path(compiled_root).expanduser()
-    compiled_root.mkdir(parents=True, exist_ok=True)
-    with (compiled_root / "birdnet.tflite").open("wb") as f:
+    save_root = Path(save_root).expanduser()
+    save_root.mkdir(parents=True, exist_ok=True)
+    with (save_root / "birdnet.tflite").open("wb") as f:
         f.write(response.content)
+
+
+def save_birdset_efficientnet(save_root: Path):
+    save_root = Path(save_root).expanduser()
+    save_root.mkdir(parents=True, exist_ok=True)
+    model_id = "DBD-research-group/EfficientNet-B1-BirdSet-XCL"
+    model = AutoModel.from_pretrained(model_id)
+    config = AutoConfig.from_pretrained(model_id)
+    model.save_pretrained(save_root)
+    config.save_pretrained(save_root)
         
 
 @app.command()
-def compile_model(compiled_root: Path, model_name: str):
+def save_model(save_root: Path, model_name: str):
     if model_name == "BirdNET":
-        save_birdnet(compiled_root)
+        save_birdnet(save_root)
     elif model_name == "Perch":
-        compile_perch(compiled_root)
+        compile_perch(save_root)
+    elif model_name == "BirdSetEfficientNetB1":
+        save_birdset_efficientnet(save_root)
     else:
         raise ValueError(f"Model {model_name} is not supported.")
 
