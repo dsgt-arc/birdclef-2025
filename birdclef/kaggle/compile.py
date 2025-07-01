@@ -87,9 +87,18 @@ def save_birdnet(save_root: Path):
 
 
 def save_birdset_efficientnet(save_root: Path):
+    model_id = "DBD-research-group/EfficientNet-B1-BirdSet-XCL"
+    save_birdset(save_root, model_id)
+
+    
+def save_birdset_convnext(save_root: Path):
+    model_id = "DBD-research-group/ConvNeXT-Base-BirdSet-XCL"
+    save_birdset(save_root, model_id)
+
+
+def save_birdset(save_root: Path, model_id: str):
     save_root = Path(save_root).expanduser()
     save_root.mkdir(parents=True, exist_ok=True)
-    model_id = "DBD-research-group/EfficientNet-B1-BirdSet-XCL"
     model = AutoModel.from_pretrained(model_id)
     config = AutoConfig.from_pretrained(model_id)
     model.save_pretrained(save_root)
@@ -104,6 +113,8 @@ def save_model(save_root: Path, model_name: str):
         compile_perch(save_root)
     elif model_name == "BirdSetEfficientNetB1":
         save_birdset_efficientnet(save_root)
+    elif model_name == "BirdSetConvNeXT":
+        save_birdset_convnext(save_root)
     else:
         raise ValueError(f"Model {model_name} is not supported.")
 
