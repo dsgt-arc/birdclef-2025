@@ -103,6 +103,16 @@ def save_birdset(save_root: Path, model_id: str):
     config = AutoConfig.from_pretrained(model_id)
     model.save_pretrained(save_root)
     config.save_pretrained(save_root)
+    
+    
+def save_rana_sierrae_cnn(save_root: Path):
+    dropbox_url = "https://www.dropbox.com/s/9uw1j8yvr75d1dl/BMZ0001_rana_seirrae_cnn_v1-0.model?dl=0"
+    download_url = dropbox_url.replace("dropbox.com", "dl.dropboxusercontent.com")
+    response = requests.get(download_url)
+    save_root = Path(save_root).expanduser()
+    save_root.mkdir(parents=True, exist_ok=True)
+    with (save_root / "rana_sierrae_cnn.model").open("wb") as f:
+        f.write(response.content)
         
 
 @app.command()
@@ -115,6 +125,8 @@ def save_model(save_root: Path, model_name: str):
         save_birdset_efficientnet(save_root)
     elif model_name == "BirdSetConvNeXT":
         save_birdset_convnext(save_root)
+    elif model_name == "RanaSierraeCNN":
+        save_rana_sierrae_cnn(save_root)
     else:
         raise ValueError(f"Model {model_name} is not supported.")
 
