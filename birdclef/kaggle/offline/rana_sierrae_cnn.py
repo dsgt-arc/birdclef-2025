@@ -36,5 +36,5 @@ class RanaSierraeCNNOffline(CNN):
 
         ## Load pre-trained weights ##
         self.network.load_state_dict(
-            torch.load(model_path)
+            torch.load(model_path / "rana_sierrae_cnn.model")
         )
