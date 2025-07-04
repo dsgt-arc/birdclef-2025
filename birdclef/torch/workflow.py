@@ -75,6 +75,7 @@ def perform_train_test_split(
         df["species_name"],
         test_size=test_size,
         stratify=df["species_name"],
+        random_state=random_state,
     )
 
     # data shape
