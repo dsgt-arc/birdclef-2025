@@ -653,7 +653,7 @@ def tune_ns(
                 epochs=20,
                 **params,
             )
-            for tokenizer in ["tokenizer"]
+            for tokenizer in ["tokenizer_pca"]
             for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
@@ -799,6 +799,65 @@ def evaluate_v1(
                     "sample": 1e-5,
                 }
             ]
+        ],
+        workers=luigi_workers,
+        local_scheduler=True,
+    )
+
+
+@app.command()
+def evaluate_v2(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    base_params = {
+        "vector_size": 1024,
+        "window": 80,
+        "ns_exponent": 1.5,
+        "sample": 1e-5,
+    }
+    luigi.build(
+        [
+            EvalWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                n_clusters=n_clusters,
+                filter_species=colombia_species_list,
+                epochs=epochs,
+                **params,
+            )
+            for tokenizer in ["tokenizer_pca"]
+            for n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [(train_root, "train")]
+            for params in [base_params]
+            for epochs in [10 * i for i in range(1, 11)]
+        ]
+        + [
+            EmbedWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                n_clusters=n_clusters,
+                epochs=100,
+                **params,
+            )
+            for tokenizer in ["tokenizer_pca"]
+            for n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [
+                (train_root, "train_all"),
+                (soundscape_root, "soundscape_all"),
+            ]
+            for params in [base_params]
         ],
         workers=luigi_workers,
         local_scheduler=True,
