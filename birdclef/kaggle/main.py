@@ -15,7 +15,10 @@ from birdclef.config import model_config
 from birdclef.torch.model import LinearClassifier
 import torch
 import multiprocessing as mp
-from .compile import load_tflite_interpreter, run_perch_tflite, run_birdnet_tflite
+from birdclef.kaggle.compile import load_tflite_interpreter, run_perch_tflite, run_birdnet_tflite
+from birdclef.kaggle.offline.birdset_efficientnet import BirdSetEfficientNetB1Offline
+from birdclef.kaggle.offline.birdset_convnext import BirdSetConvNeXTOffline
+from birdclef.kaggle.offline.rana_sierrae_cnn import RanaSierraeCNNOffline
 from birdclef.mel2vec.loaders import get_word_vectors, get_index
 import numpy as np
 import pandas as pd
@@ -77,7 +80,15 @@ def get_embed_func(model_name, model_path, clip_step, tflite_threads):
         def embed_func(audio_file):
             return _process_mfcc(audio_file, index, word_vector, n_mfcc=20)
     else:
-        embedder = bmz.list_models()[model_name]()
+        if model_name == "BirdSetEfficientNetB1":
+            embedder = BirdSetEfficientNetB1Offline(model_path)
+        elif model_name == "BirdSetConvNeXT":
+            embedder = BirdSetConvNeXTOffline(model_path)
+        elif model_name == "RanaSierraeCNN":
+            embedder = RanaSierraeCNNOffline(model_path)
+        else:
+            embedder = bmz.list_models()[model_name]()
+        
         if model_name in ["BirdNET", "Perch"]:
             # look for tflite file next to the label_to_idx...
             tflite_path = list(model_path.glob("*.tflite"))[0]
