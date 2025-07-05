@@ -661,7 +661,7 @@ def tune_ns(
                     "vector_size": 384,
                     "window": 80,
                     "ns_exponent": ns_exponent,
-                    "sample": 1e-5,
+                    "sample": sample,
                 }
                 for ns_exponent in [
                     -1.5,
@@ -681,6 +681,7 @@ def tune_ns(
                     2.0,
                     2.5,
                 ]
+                for sample in [1e-4, 1e-5]
             ]
         ],
         workers=luigi_workers,
@@ -805,20 +806,14 @@ def evaluate_v1(
     )
 
 
-@app.command()
-def evaluate_v2(
+def _evaluate(
+    base_params: dict,
     train_root: str,
     soundscape_root: str,
     output_root: str,
     gensim_workers: int = 8,
     luigi_workers: int = 4,
 ):
-    base_params = {
-        "vector_size": 1024,
-        "window": 80,
-        "ns_exponent": 1.5,
-        "sample": 1e-5,
-    }
     luigi.build(
         [
             EvalWord2VecTask(
@@ -861,6 +856,80 @@ def evaluate_v2(
         ],
         workers=luigi_workers,
         local_scheduler=True,
+    )
+
+
+@app.command()
+def evaluate_v2(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    base_params = {
+        "vector_size": 1024,
+        "window": 80,
+        "ns_exponent": 1.5,
+        "sample": 1e-5,
+    }
+    _evaluate(
+        base_params,
+        train_root=train_root,
+        soundscape_root=soundscape_root,
+        output_root=output_root,
+        gensim_workers=gensim_workers,
+        luigi_workers=luigi_workers,
+    )
+
+
+@app.command()
+def evaluate_v3(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    """Turns out that when we change the sample rate, we need to also change the ns exponent."""
+    base_params = {
+        "vector_size": 1024,
+        "window": 80,
+        "ns_exponent": 0,
+        "sample": 1e-5,
+    }
+    _evaluate(
+        base_params,
+        train_root=train_root,
+        soundscape_root=soundscape_root,
+        output_root=output_root,
+        gensim_workers=gensim_workers,
+        luigi_workers=luigi_workers,
+    )
+
+
+@app.command()
+def evaluate_v4(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    """Turns out that when we change the sample rate, we need to also change the ns exponent."""
+    base_params = {
+        "vector_size": 1024,
+        "window": 80,
+        "ns_exponent": -0.75,
+        "sample": 1e-4,
+    }
+    _evaluate(
+        base_params,
+        train_root=train_root,
+        soundscape_root=soundscape_root,
+        output_root=output_root,
+        gensim_workers=gensim_workers,
+        luigi_workers=luigi_workers,
     )
 
 
