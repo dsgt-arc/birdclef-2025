@@ -12,6 +12,9 @@ from torch.utils.data import DataLoader, Dataset
 import typer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
+import tqdm
+from birdclef.mel2vec.loaders import get_index, get_pca, tokenize
+from functools import partial
 
 app = typer.Typer()
 
@@ -142,6 +145,86 @@ class LitStudentModel(L.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=1e-4)
 
 
+# get the token dataset now
+def get_token(mfcc, index_path, pca_path=None):
+    index = get_index(index_path)
+    pca = None
+    if pca_path:
+        pca = get_pca(pca_path)
+    X = np.array(mfcc).reshape(1, -1)
+    tokens = tokenize(X, index, pca=pca)
+    return tokens[0]
+
+
+@app.command()
+def generate_token_perch(
+    mfcc_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mfcc-soundscape/data",
+        help="Path to MFCC parquet data.",
+    ),
+    perch_path: Path = typer.Option(
+        "~/shared/birdclef/2025/infer-soundscape/Perch/parts/predict/*.parquet",
+        help="Glob path to Perch prediction parquet files.",
+    ),
+    tokenizer_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mel2vec-v2/tokenizer_pca/n_clusters=16383",
+        help="Path to centroids/pca",
+    ),
+    output_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mel2vec-v2/soundscape-token-perch",
+        help="Output directory for tokenized parquet.",
+    ),
+    num_workers: int = typer.Option(8, help="Number of workers for multiprocessing."),
+):
+    mfcc_path = Path(mfcc_path).expanduser()
+    perch_path = Path(perch_path).expanduser()
+    tokenizer_path = Path(tokenizer_path).expanduser()
+    output_path = Path(output_path).expanduser()
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    mfcc_df = pl.scan_parquet(str(mfcc_path)).sort("file", "timestamp")
+    perch = pl.scan_parquet(str(perch_path))
+    columns = perch.collect_schema().names()
+    perch = perch.select(
+        pl.col("file").str.split("/").list.last().alias("file"),
+        "start_time",
+        "end_time",
+        (pl.concat_list(columns[3:]).list.to_array(len(columns[3:])).alias("logits")),
+    ).sort("file", "start_time")
+
+    mfcc_series = mfcc_df.select("mfcc").collect().get_column("mfcc")
+    func = partial(
+        get_token,
+        index_path=str(tokenizer_path / "centroids.npy"),
+        pca_path=str(tokenizer_path / "pca.bin"),
+    )
+    with mp.Pool(num_workers) as pool:
+        tokens = pool.map(func, tqdm.tqdm(mfcc_series, desc="Tokenizing MFCCs"))
+
+    tokenized = (
+        mfcc_df.with_columns(
+            (pl.col("timestamp") // 5 * 5).alias("start_time"),
+            pl.Series(tokens).alias("token"),
+            pl.col("file").str.split("/").list.last().alias("file"),
+            "part",
+        )
+        .group_by("part", "file", "start_time")
+        .agg(pl.col("token").sort_by("timestamp").alias("tokens"))
+    )
+
+    tokenized.join(
+        perch,
+        on=["file", "start_time"],
+        how="left",
+    ).select(
+        "part",
+        "file",
+        "start_time",
+        "tokens",
+        "logits",
+    ).collect().write_parquet(str(output_path), use_pyarrow=True, partition_by=["part"])
+
+
 @app.command()
 def train(
     prefix: str,
@@ -154,14 +237,19 @@ def train(
         "--resume/--no-resume",
         help="Resume training from last checkpoint if available.",
     ),
+    root: Path = typer.Option(
+        "~/scratch/birdclef/2025/mel2vec-v1",
+        help="Root directory for the mel2vec dataset.",
+    ),
+    data_path: Path = typer.Option(
+        "~/scratch/birdclef/2025/soundscape-token-perch",
+    ),
 ):
-    scratch = Path("~/scratch/birdclef/2025").expanduser()
-    root = scratch / "mel2vec-v1"
-
+    root = Path(root).expanduser().resolve()
     wordvector_path = list(
         (root / "word2vec").glob("**/epochs=100/word2vec.wordvectors")
     )[0]
-    data_path = scratch / "soundscape-token-perch"
+    data_path = Path(data_path).expanduser().resolve()
 
     # Instantiate datasets and dataloaders
     train_ds = STGTEmbeddingDataset(data_path, wordvector_path, split="train")
@@ -182,7 +270,7 @@ def train(
     print(model)
 
     # Output path for checkpoints and logs
-    output_path = scratch / f"mel2vec-v1/student-teacher/{prefix}"
+    output_path = Path(f"{root}/{prefix}").expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
     # TensorBoard logger
