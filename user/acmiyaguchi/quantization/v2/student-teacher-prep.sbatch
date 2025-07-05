@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=birdclef-student-teacher-prep --account=paceship-dsgt_clef2025
-#SBATCH --nodes=1 --ntasks=1 --cpus-per-task=8 --mem-per-cpu=8G
+#SBATCH --nodes=1 --ntasks=1 --cpus-per-task=8 --mem-per-cpu=24G
 #SBATCH --qos=embers --time=1:00:00 --output=logs/Report-student-teacher-prep-%j.log
 #SBATCH --mail-type=BEGIN,END,FAIL --mail-user=acmiyaguchi@gatech.edu
 

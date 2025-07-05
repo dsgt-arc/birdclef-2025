@@ -180,7 +180,6 @@ def generate_token_perch(
     perch_path = Path(perch_path).expanduser()
     tokenizer_path = Path(tokenizer_path).expanduser()
     output_path = Path(output_path).expanduser()
-    output_path.mkdir(parents=True, exist_ok=True)
 
     mfcc_df = pl.scan_parquet(str(mfcc_path)).sort("file", "timestamp")
     perch = pl.scan_parquet(str(perch_path))
@@ -200,6 +199,7 @@ def generate_token_perch(
     )
     with mp.Pool(num_workers) as pool:
         tokens = pool.map(func, tqdm.tqdm(mfcc_series, desc="Tokenizing MFCCs"))
+    del mfcc_series
 
     tokenized = (
         mfcc_df.with_columns(

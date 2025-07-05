@@ -20,4 +20,4 @@ scratch_dir=$(realpath ~/scratch/birdclef)
 python -m birdclef.mel2vec.student_teacher train \
     "student-teacher" \
     --root $scratch_dir/2025v2/mel2vec-v2 \
-    --data-path $scratch_dir/2025v2/mfcc-soundscape/data
+    --data-path $scratch_dir/2025v2/mel2vec-v2/soundscape-token-perch
