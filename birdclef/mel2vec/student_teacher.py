@@ -1,17 +1,28 @@
 import multiprocessing as mp
+from functools import partial
 from pathlib import Path
 
+import lightning as L
+import matplotlib.pyplot as plt
 import numpy as np
 import polars as pl
-import lightning as L
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from gensim.models import KeyedVectors
-from torch.utils.data import DataLoader, Dataset
+import tqdm
 import typer
+from gensim.models import KeyedVectors
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
+from pacmap import PaCMAP
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score, classification_report
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from torch.utils.data import DataLoader, Dataset
+import json
+from birdclef.config import colombia_species_list
+from birdclef.mel2vec.loaders import get_index, get_pca, get_word_vectors, tokenize
 
 app = typer.Typer()
 
@@ -142,6 +153,95 @@ class LitStudentModel(L.LightningModule):
         return torch.optim.Adam(self.parameters(), lr=1e-4)
 
 
+# get the token dataset now
+def get_token(mfcc, index_path, pca_path=None):
+    index = get_index(index_path)
+    pca = None
+    if pca_path:
+        pca = get_pca(pca_path)
+    X = np.array(mfcc).reshape(1, -1)
+    tokens = tokenize(X, index, pca=pca)
+    return tokens[0]
+
+
+def get_token_dataframe(
+    df: pl.LazyFrame,
+    tokenizer_path: str | Path,
+    group_by=["part", "file", "start_time"],
+    num_workers=8,
+):
+    index_path = Path(tokenizer_path) / "centroids.npy"
+    pca_path: Path = Path(tokenizer_path) / "pca.bin"
+    if not pca_path.exists():
+        pca_path = None
+
+    mfcc_series = df.select("mfcc").collect().get_column("mfcc")
+    func = partial(get_token, index_path=index_path, pca_path=pca_path)
+    with mp.Pool(num_workers) as pool:
+        tokens = pool.map(func, tqdm.tqdm(mfcc_series, desc="Tokenizing MFCCs"))
+
+    return (
+        df.with_columns(
+            (pl.col("timestamp") // 5 * 5).alias("start_time"),
+            pl.Series(tokens).alias("tokens"),
+            pl.col("file").str.split("/").list.last().alias("file"),
+            "part",
+        )
+        .group_by(*group_by)
+        .agg(pl.col("tokens").sort_by("timestamp").alias("tokens"))
+        .sort("file", "start_time")
+    )
+
+
+@app.command()
+def generate_token_perch(
+    mfcc_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mfcc-soundscape/data",
+        help="Path to MFCC parquet data.",
+    ),
+    perch_path: Path = typer.Option(
+        "~/shared/birdclef/2025/infer-soundscape/Perch/parts/predict/*.parquet",
+        help="Glob path to Perch prediction parquet files.",
+    ),
+    tokenizer_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mel2vec-v2/tokenizer_pca/n_clusters=16383",
+        help="Path to centroids/pca",
+    ),
+    output_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mel2vec-v2/soundscape-token-perch",
+        help="Output directory for tokenized parquet.",
+    ),
+):
+    mfcc_path = Path(mfcc_path).expanduser()
+    perch_path = Path(perch_path).expanduser()
+    tokenizer_path = Path(tokenizer_path).expanduser()
+    output_path = Path(output_path).expanduser()
+
+    perch = pl.scan_parquet(str(perch_path))
+    columns = perch.collect_schema().names()
+    perch = perch.select(
+        pl.col("file").str.split("/").list.last().alias("file"),
+        "start_time",
+        "end_time",
+        (pl.concat_list(columns[3:]).list.to_array(len(columns[3:])).alias("logits")),
+    ).sort("file", "start_time")
+
+    get_token_dataframe(
+        df=pl.scan_parquet(str(mfcc_path)).sort("file", "timestamp"),
+        tokenizer_path=str(tokenizer_path),
+    ).join(
+        perch,
+        on=["file", "start_time"],
+        how="left",
+    ).select(
+        "part",
+        "file",
+        "start_time",
+        "tokens",
+        "logits",
+    ).collect().write_parquet(str(output_path), use_pyarrow=True, partition_by=["part"])
+
+
 @app.command()
 def train(
     prefix: str,
@@ -154,14 +254,19 @@ def train(
         "--resume/--no-resume",
         help="Resume training from last checkpoint if available.",
     ),
+    root: Path = typer.Option(
+        "~/scratch/birdclef/2025/mel2vec-v1",
+        help="Root directory for the mel2vec dataset.",
+    ),
+    data_path: Path = typer.Option(
+        "~/scratch/birdclef/2025/soundscape-token-perch",
+    ),
 ):
-    scratch = Path("~/scratch/birdclef/2025").expanduser()
-    root = scratch / "mel2vec-v1"
-
+    root = Path(root).expanduser().resolve()
     wordvector_path = list(
         (root / "word2vec").glob("**/epochs=100/word2vec.wordvectors")
     )[0]
-    data_path = scratch / "soundscape-token-perch"
+    data_path = Path(data_path).expanduser().resolve()
 
     # Instantiate datasets and dataloaders
     train_ds = STGTEmbeddingDataset(data_path, wordvector_path, split="train")
@@ -182,7 +287,7 @@ def train(
     print(model)
 
     # Output path for checkpoints and logs
-    output_path = scratch / f"mel2vec-v1/student-teacher/{prefix}"
+    output_path = Path(f"{root}/{prefix}").expanduser().resolve()
     output_path.mkdir(parents=True, exist_ok=True)
 
     # TensorBoard logger
@@ -219,6 +324,119 @@ def train(
         val_dataloaders=val_loader,
         ckpt_path=ckpt_path,
     )
+
+
+def plot_pacmap(X, y, le, title):
+    z = PaCMAP().fit_transform(X)
+    for i, species in enumerate(le.classes_):
+        plt.scatter(z[y == i, 0], z[y == i, 1], label=species, alpha=0.5, s=1)
+    plt.legend()
+    plt.xlabel("PaCMAP 1")
+    plt.ylabel("PaCMAP 2")
+    plt.title(title)
+
+
+@app.command()
+def evaluate(
+    scratch: Path = typer.Option(
+        "~/scratch/birdclef/2025v2",
+        help="Scratch directory containing data and models.",
+    ),
+    wordvector_prefix_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mel2vec-v2/word2vec",
+        help="Path to the word2vec directory.",
+    ),
+    tokenizer_path: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mel2vec-v2/tokenizer_pca/n_clusters=16383",
+        help="Path to centroids/pca.",
+    ),
+    ckpt_dir: Path = typer.Option(
+        "~/scratch/birdclef/2025v2/mel2vec-v2/student-teacher",
+        help="Directory containing the student-teacher checkpoint.",
+    ),
+    num_workers: int = typer.Option(
+        8,
+        help="Number of workers for parallel processing.",
+    ),
+):
+    scratch = Path(scratch).expanduser()
+    tokenizer_path = Path(tokenizer_path).expanduser()
+    ckpt_dir = Path(ckpt_dir).expanduser()
+
+    mfcc_df = (
+        pl.scan_parquet(f"{scratch}/mfcc-train/data", low_memory=True)
+        .with_columns(
+            pl.col("file").str.split("/").list.get(-2).alias("species"),
+        )
+        .filter(pl.col("species").is_in(colombia_species_list))
+    )
+
+    tokenized = get_token_dataframe(
+        mfcc_df,
+        tokenizer_path,
+        group_by=["species", "file", "start_time"],
+        num_workers=num_workers,
+    ).select("species", "tokens")
+
+    df = tokenized.collect().to_pandas()
+    wordvector_path = list(
+        Path(wordvector_prefix_path).glob("**/epochs=100/word2vec.wordvectors")
+    )[0].as_posix()
+    wordvectors = get_word_vectors(wordvector_path)
+
+    model = LitStudentModel.load_from_checkpoint(
+        (ckpt_dir / "best.ckpt").as_posix(),
+        wordvectors=wordvectors,
+    )
+
+    # replace the classifier with an identity function
+    model.classifier = nn.Identity()
+    model.eval()
+
+    clean = df[df.tokens.apply(len) == 40]
+    tokens = np.stack(clean.tokens.values)
+    with torch.no_grad():
+        X = model(torch.from_numpy(tokens)).cpu().numpy()
+
+    y = clean["species"].values
+    le = LabelEncoder()
+    y = le.fit_transform(y)
+
+    # stratify the split by species
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42, stratify=y
+    )
+    clf = LogisticRegression(max_iter=1000, n_jobs=-1)
+    clf.fit(X_train, y_train)
+    y_pred = clf.predict(X_test)
+    scores = {
+        "f1_macro_score": f1_score(y_test, y_pred, average="macro"),
+        "f1_micro_score": f1_score(y_test, y_pred, average="micro"),
+        "accuracy": clf.score(X_test, y_test),
+        # "roc_auc": roc_auc_score(
+        #     y_test,
+        #     clf.predict_proba(X_test),
+        #     multi_class="ovr",
+        #     labels=sorted(
+        #         set(le.inverse_transform(y_pred)) | set(le.inverse_transform(y_test))
+        #     ),
+        # ),
+    }
+    output_root = ckpt_dir / "evaluation"
+    output_root.mkdir(parents=True, exist_ok=True)
+    print(scores)
+    with open(output_root / "scores.json", "w") as f:
+        json.dump(scores, f, indent=2)
+
+    report = classification_report(
+        y_test, y_pred, labels=np.arange(len(le.classes_)), target_names=le.classes_
+    )
+    print(report)
+    with open(output_root / "classification_report.txt", "w") as f:
+        f.write(report)
+
+    plot_pacmap(X, y, le, "PaCMAP of Student-Teacher Embeddings")
+    plt.savefig(output_root / "pacmap.png", dpi=300, bbox_inches="tight")
 
 
 if __name__ == "__main__":

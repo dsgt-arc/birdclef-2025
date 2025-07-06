@@ -12,7 +12,7 @@ from gensim.models import Word2Vec
 from pacmap import PaCMAP
 from pyspark.sql import functions as F
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, f1_score
+from sklearn.metrics import roc_auc_score, f1_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
@@ -34,10 +34,23 @@ class OptionsMixin:
     )
 
 
-class BuildTokenizer(luigi.Task, OptionsMixin):
-    input_dim = luigi.IntParameter(default=20)
+class BuildTokenizerOptionsMixin:
+    input_dim = luigi.IntParameter(default=768)
     n_clusters = luigi.IntParameter(default=2**14 - 1)
+    feature_column = luigi.Parameter(
+        default="mfcc",
+        description="The feature column to use for clustering",
+    )
+    kmeans_niter = luigi.IntParameter(
+        default=10, description="Number of KMeans iterations"
+    )
+    pca_dim = luigi.IntParameter(
+        default=128,
+        description="Dimension of the PCA transformation to apply before clustering",
+    )
 
+
+class BuildTokenizer(luigi.Task, OptionsMixin, BuildTokenizerOptionsMixin):
     prefix = "tokenizer"
 
     def output(self):
@@ -53,14 +66,29 @@ class BuildTokenizer(luigi.Task, OptionsMixin):
             pl.scan_parquet(self.input_root)
             .filter(pl.col("part") < 80)
             .sort("file", "timestamp")
-            .select("file", "timestamp", "mfcc")
+            .select("file", "timestamp", self.feature_column)
         )
         return df
 
     def _prepare_matrix(self, df):
-        """Prepare the matrix of MFCC features from the DataFrame."""
-        X = np.stack(df.select("mfcc").collect().get_column("mfcc").to_numpy())
+        """Prepare the matrix of spectrogram features from the DataFrame.
+
+        The feature column can be MFCC or melspectrogram vectors.
+        """
+        X = np.stack(
+            df.select(self.feature_column)
+            .collect()
+            .get_column(self.feature_column)
+            .to_numpy()
+        )
+        return X
+
+    def _normalize_matrix(self, X):
+        """Normalize the matrix of spectrogram features."""
+        # perform per-sample l2 normalization with small episilon for numerical stability
+        # NOTE: this makes the tokenizer incompatible with previous versions
         X = X.astype(np.float32)
+        X = X / (np.linalg.norm(X, axis=1, keepdims=True) + 1e-8)
         return X
 
     def _save_centroids(self, cluster_faiss):
@@ -71,19 +99,21 @@ class BuildTokenizer(luigi.Task, OptionsMixin):
 
     def run(self):
         # use the first 80% of the data for training
+        # The feature column can be MFCC or melspectrogram vectors.
         df = self._load_data()
         X = self._prepare_matrix(df)
+        X = self._normalize_matrix(X)
         cluster_faiss = faiss.Kmeans(
             d=self.input_dim,
             k=self.n_clusters,
-            niter=25,
+            niter=self.kmeans_niter,
             verbose=True,
         )
         cluster_faiss.train(X)
         self._save_centroids(cluster_faiss)
 
 
-class BuildPCATokenizer(BuildTokenizer):
+class BuildPCATokenizer(BuildTokenizer, BuildTokenizerOptionsMixin):
     prefix = "tokenizer_pca"
 
     def output(self):
@@ -103,26 +133,26 @@ class BuildPCATokenizer(BuildTokenizer):
         faiss.write_VectorTransform(pca, output.as_posix())
 
     def run(self):
-        # use the first 80% of the data for training
         df = self._load_data()
         X = self._prepare_matrix(df)
-
-        pca = faiss.PCAMatrix(self.input_dim, self.input_dim)
+        pca = faiss.PCAMatrix(self.input_dim, self.pca_dim)
         pca.train(X)
 
         cluster_faiss = faiss.Kmeans(
-            d=self.input_dim,
+            d=self.pca_dim,
             k=self.n_clusters,
-            niter=25,
+            niter=self.kmeans_niter,
             verbose=True,
         )
-        cluster_faiss.train(pca.apply(X))
+        X = pca.apply(X)
+        X = self._normalize_matrix(X)
+        cluster_faiss.train(X)
 
         self._save_centroids(cluster_faiss)
         self._save_pca(pca)
 
 
-class Word2VecOptionsMixin(OptionsMixin):
+class Word2VecOptionsMixin(OptionsMixin, BuildTokenizerOptionsMixin):
     vector_size = luigi.IntParameter(default=256)
     window = luigi.IntParameter(default=40)
     ns_exponent = luigi.FloatParameter(default=0.75)
@@ -134,27 +164,28 @@ class Word2VecOptionsMixin(OptionsMixin):
         choices=["tokenizer", "tokenizer_pca"],
         description="The tokenizer to use for training the Word2Vec model",
     )
-    tokenizer_n_clusters = luigi.IntParameter(
-        default=2**14 - 1,
-        description="Number of clusters to use for the tokenizer",
-    )
     step = luigi.IntParameter(default=10, description="Number of epochs per checkpoint")
 
 
 class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
-    """Task to train a Word2Vec model on a specific set of audio files."""
+    """Task to train a Word2Vec model on a specific set of audio files.
+
+    The feature column can be MFCC or melspectrogram vectors.
+    """
 
     def requires(self):
         reqs = {
             "tokenizer": BuildTokenizer(
                 input_root=self.input_root,
                 output_root=self.output_root,
-                n_clusters=self.tokenizer_n_clusters,
+                n_clusters=self.n_clusters,
+                kmeans_niter=self.kmeans_niter,
             ),
             "tokenizer_pca": BuildPCATokenizer(
                 input_root=self.input_root,
                 output_root=self.output_root,
-                n_clusters=self.tokenizer_n_clusters,
+                n_clusters=self.n_clusters,
+                kmeans_niter=self.kmeans_niter,
             ),
         }
         # recursive dependency for checkpointing.
@@ -174,7 +205,9 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
             f"{k}={v}"
             for k, v in [
                 ("tokenizer", self.tokenizer),
-                ("tokenizer_n_clusters", self.tokenizer_n_clusters),
+                # NOTE: this is no longer backwards compatible, and it also means that
+                # the first job with n_iters is the first one we get.
+                ("n_clusters", self.n_clusters),
                 ("vector_size", self.vector_size),
                 ("window", self.window),
                 ("ns_exponent", self.ns_exponent),
@@ -195,37 +228,36 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
         }
 
     def token_generator(self, df, limit=-1):
+        # Prepare centroids and index for tokenization
+        index = loaders.get_index(
+            self.requires()["tokenizer"].output()["centroids"].path
+        )
+        if self.tokenizer == "tokenizer_pca":
+            pca = loaders.get_pca(self.requires()["tokenizer"].output()["pca"].path)
+        else:
+            pca = None
+
         if limit > 0:
             df = df.filter(pl.col("part") < limit)
+        # Use lazy evaluation: process each partition/file as needed
         for sub in df.collect().partition_by("file"):
-            yield sub.sort("timestamp").get_column("token").to_list()
+            features = np.stack(
+                sub.sort("timestamp").get_column(self.feature_column).to_numpy()
+            )
+            yield loaders.tokenize(features, index, pca)
 
     def run(self):
-        centroids = np.load(self.requires()["tokenizer"].output()["centroids"].path)
-        index = faiss.IndexFlatL2(centroids.shape[1])
-        index.add(centroids)
-
         df = (
             pl.scan_parquet(self.input_root)
             .filter(pl.col("part") < 80)
             .sort("file", "timestamp")
         )
 
-        X = np.stack(df.select("mfcc").collect().get_column("mfcc").to_numpy())
-        if self.tokenizer == "tokenizer_pca":
-            pca = faiss.read_VectorTransform(
-                self.requires()["tokenizer"].output()["pca"].path
-            )
-            X = pca.apply(X)
-        X = X.astype(np.float32)
-        _, indices = index.search(X, 1)
-        ids = pl.Series("token", indices.flatten())
-        token_df = df.with_columns(ids)
-
+        # Remove eager tokenization, use token_generator for lazy tokenization
         with Timer() as t:
             if "prev" not in self.requires():
                 model = Word2Vec(
-                    sentences=list(self.token_generator(token_df)),
+                    sentences=list(self.token_generator(df)),
                     epochs=self.step,
                     vector_size=self.vector_size,
                     min_count=1,
@@ -243,7 +275,7 @@ class Word2VecTask(luigi.Task, Word2VecOptionsMixin):
                 # continue training from previous checkpoint
                 model = Word2Vec.load(self.requires()["prev"].output()["model"].path)
                 model.train(
-                    list(self.token_generator(token_df)),
+                    list(self.token_generator(df)),
                     total_examples=model.corpus_count,
                     epochs=self.step,
                     start_alpha=model.alpha,
@@ -294,8 +326,9 @@ class EmbedWord2VecOptionsMixin(Word2VecOptionsMixin):
 class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
     """Task to embed audio files using the trained Word2Vec model.
 
+    The feature column can be MFCC or melspectrogram vectors.
     We should be using the soundscape dataset to train the word2vec model.
-    We'll want to embed the actual mfccs on the training dataset though.
+    We'll want to embed the actual feature vectors on the training dataset though.
     """
 
     def output(self):
@@ -303,7 +336,7 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
             f"{k}={v}"
             for k, v in [
                 ("tokenizer", self.tokenizer),
-                ("tokenizer_n_clusters", self.tokenizer_n_clusters),
+                ("tokenizer_n_clusters", self.n_clusters),
                 ("vector_size", self.vector_size),
                 ("window", self.window),
                 ("ns_exponent", self.ns_exponent),
@@ -326,7 +359,8 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
             sample=self.sample,
             workers=self.workers,
             tokenizer=self.tokenizer,
-            tokenizer_n_clusters=self.tokenizer_n_clusters,
+            n_clusters=self.n_clusters,
+            kmeans_niter=self.kmeans_niter,
         )
         return {
             "word2vec": word2vec,
@@ -359,19 +393,22 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
                 index_path: str = index_path,
                 pca_path: str | None = pca_path,
             ) -> list:
-                # convert mfcc to word vectors
+                # convert feature vector (MFCC or melspectrogram) to word vectors
                 X = np.array(mfcc).reshape(1, -1)
-                if self.tokenizer == "tokenizer_pca":
-                    # unfortunately we can't serialize PCA so reread it from disk every time,
-                    pca = loaders.get_pca(pca_path)
-                    X = pca.apply(X)
+
                 index = loaders.get_index(index_path)
+                pca = loaders.get_pca(pca_path) if pca_path else None
+                token = loaders.tokenize(X, index, pca)[0]
                 word_vectors = loaders.get_word_vectors(wv_path)
-                _, indices = index.search(X, 1)
-                return word_vectors[indices[0][0]].tolist()
+                if token not in word_vectors:
+                    # if the token is not found, return a zero vector
+                    return [0.0] * len(word_vectors[0])
+                # return the word vector for the token
+                return word_vectors[token].tolist()
 
             @F.udf(returnType="array<float>")
             def get_mfcc_stats(mfcc: list) -> list:
+                # Compute mean and std of feature vectors (MFCC or melspectrogram)
                 X = np.stack(mfcc)
                 return X.mean(axis=0).tolist() + X.std(axis=0).tolist()
 
@@ -393,14 +430,14 @@ class EmbedWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
 
             (
                 df.withColumn("start_time", get_start_time(F.col("timestamp")))
-                .withColumn("word_vector", mfcc_to_wv(F.col("mfcc")))
+                .withColumn("word_vector", mfcc_to_wv(F.col(self.feature_column)))
                 .groupBy("file", "start_time")
                 .agg(
-                    F.collect_list("mfcc").alias("mfcc"),
+                    F.collect_list(self.feature_column).alias(self.feature_column),
                     F.collect_list("word_vector").alias("word_vector"),
                 )
                 .where(F.col("start_time") >= 0)
-                .withColumn("mfcc_stats", get_mfcc_stats(F.col("mfcc")))
+                .withColumn("mfcc_stats", get_mfcc_stats(F.col(self.feature_column)))
                 .withColumn("word_vector", avg_vector(F.col("word_vector")))
                 .select("file", "start_time", "mfcc_stats", "word_vector")
                 .repartition(20)
@@ -423,12 +460,13 @@ class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
                 output_prefix="train",
                 filter_species=self.filter_species,
                 tokenizer=self.tokenizer,
-                tokenizer_n_clusters=self.tokenizer_n_clusters,
+                n_clusters=self.n_clusters,
                 vector_size=self.vector_size,
                 window=self.window,
                 ns_exponent=self.ns_exponent,
                 sample=self.sample,
                 epochs=self.epochs,
+                kmeans_niter=self.kmeans_niter,
             ),
         }
 
@@ -472,6 +510,9 @@ class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
             "f1_macro_score": f1_score(y_test, y_pred, average="macro"),
             "f1_micro_score": f1_score(y_test, y_pred, average="micro"),
             "accuracy": model.score(X_test, y_test),
+            "roc_auc": roc_auc_score(
+                y_test, model.predict_proba(X_test), multi_class="ovr"
+            ),
         }
         output_root = Path(self.output()["scores"].path).parent
         output_root.mkdir(parents=True, exist_ok=True)
@@ -493,50 +534,6 @@ class EvalWord2VecTask(luigi.Task, EmbedWord2VecOptionsMixin):
         plt.savefig(self.output()["plot"].path)
 
 
-# @app.command()
-# def run(
-#     train_root: str,
-#     soundscape_root: str,
-#     output_root: str,
-#     gensim_workers: int = 8,
-#     luigi_workers: int = 8,
-# ):
-#     """Run the tokenizer building process.
-
-#     Note that the inputs for train and soundscape roots as of writing of this comment
-#     is for these to be the pre-computed MFCCs, and not the raw audio.
-#     """
-#     luigi.build(
-#         [
-#             EmbedWord2VecTask(
-#                 input_root=input_root,
-#                 soundscape_root=soundscape_root,
-#                 output_root=output_root,
-#                 output_prefix=output_prefix,
-#                 workers=gensim_workers,
-#                 tokenizer=tokenizer,
-#                 **params,
-#             )
-#             for tokenizer in ["tokenizer", "tokenizer_pca"]
-#             for input_root, output_prefix in [
-#                 (train_root, "train"),
-#                 (soundscape_root, "soundscape"),
-#             ]
-#             for params in [
-#                 {
-#                     "epochs": 100,
-#                     "vector_size": 256,
-#                     "window": 80,
-#                     "ns_exponent": 0.75,
-#                     "sample": 1e-4,
-#                 }
-#             ]
-#         ],
-#         workers=luigi_workers,
-#         local_scheduler=True,
-#     )
-
-
 @app.command()
 def tune_tokenizer(
     train_root: str,
@@ -548,7 +545,7 @@ def tune_tokenizer(
     """Run the tokenizer building process.
 
     Note that the inputs for train and soundscape roots as of writing of this comment
-    is for these to be the pre-computed MFCCs, and not the raw audio.
+    is for these to be the pre-computed MFCC or melspectrogram vectors, and not the raw audio.
     """
     luigi.build(
         [
@@ -559,13 +556,13 @@ def tune_tokenizer(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 **params,
             )
-            for tokenizer in ["tokenizer"]
-            # 4k, 8k, 16k, 32k, 64k
-            for tokenizer_n_clusters in [2**12, 2**13, 2**14 - 1, 2**15 - 1, 2**16 - 1]
+            for tokenizer in ["tokenizer", "tokenizer_pca"]
+            # 4k, 8k, 16k, 32k
+            for n_clusters in [2**12, 2**13, 2**14 - 1, 2**15 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -591,6 +588,23 @@ def tune_w2v(
     luigi_workers: int = 8,
 ):
     """Tune the Word2Vec model parameters."""
+    baseline = {
+        "vector_size": 384,
+        "window": 80,
+        "ns_exponent": 1.5,
+        "sample": 1e-5,
+    }
+    experiments = [baseline]
+    for vector_size in [128, 256, 512, 1028]:
+        experiments.append({**baseline, "vector_size": vector_size})
+    for window in [40, 120]:
+        experiments.append({**baseline, "window": window})
+    for ns_exponent in [0.0, -0.5]:
+        experiments.append({**baseline, "ns_exponent": ns_exponent})
+    for sample in [1e-4, 1e-6]:
+        experiments.append({**baseline, "sample": sample})
+    # Combination experiment: Optimized for rare species
+    experiments.append({**baseline, "window": 120, "ns_exponent": -0.5})
     luigi.build(
         [
             EvalWord2VecTask(
@@ -600,94 +614,16 @@ def tune_w2v(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=20,
+                kmeans_niter=10,
                 **params,
             )
-            for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for tokenizer in ["tokenizer", "tokenizer_pca"]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
-            for params in [
-                # Baseline Configuration
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                # Varying Vector Size
-                {
-                    "vector_size": 128,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 384,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 512,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 1028,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                # Varying Window Size
-                {
-                    "vector_size": 256,
-                    "window": 40,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 256,
-                    "window": 120,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-4,
-                },
-                # Varying Negative Sampling Exponent (Key for imbalance)
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.0,
-                    "sample": 1e-4,
-                },
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": -0.5,
-                    "sample": 1e-4,
-                },
-                # Varying Downsampling Rate
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-5,
-                },
-                {
-                    "vector_size": 256,
-                    "window": 80,
-                    "ns_exponent": 0.75,
-                    "sample": 1e-6,
-                },
-                # Combination Experiment: Optimized for Rare Species
-                {
-                    "vector_size": 256,
-                    "window": 120,
-                    "ns_exponent": -0.5,
-                    "sample": 1e-4,
-                },
-            ]
+            for params in experiments
         ],
         workers=luigi_workers,
         local_scheduler=True,
@@ -712,20 +648,20 @@ def tune_ns(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=20,
                 **params,
             )
-            for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for tokenizer in ["tokenizer_pca"]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
                     "vector_size": 384,
                     "window": 80,
                     "ns_exponent": ns_exponent,
-                    "sample": 1e-5,
+                    "sample": sample,
                 }
                 for ns_exponent in [
                     -1.5,
@@ -745,6 +681,7 @@ def tune_ns(
                     2.0,
                     2.5,
                 ]
+                for sample in [1e-4, 1e-5]
             ]
         ],
         workers=luigi_workers,
@@ -774,13 +711,13 @@ def evaluate_strawman(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=epochs,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -819,13 +756,13 @@ def evaluate_v1(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 filter_species=colombia_species_list,
                 epochs=epochs,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [(train_root, "train")]
             for params in [
                 {
@@ -845,11 +782,11 @@ def evaluate_v1(
                 output_prefix=output_prefix,
                 workers=gensim_workers,
                 tokenizer=tokenizer,
-                tokenizer_n_clusters=tokenizer_n_clusters,
+                n_clusters=n_clusters,
                 **params,
             )
             for tokenizer in ["tokenizer"]
-            for tokenizer_n_clusters in [2**14 - 1]
+            for n_clusters in [2**14 - 1]
             for input_root, output_prefix in [
                 (train_root, "train_all"),
                 (soundscape_root, "soundscape_all"),
@@ -866,6 +803,133 @@ def evaluate_v1(
         ],
         workers=luigi_workers,
         local_scheduler=True,
+    )
+
+
+def _evaluate(
+    base_params: dict,
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    luigi.build(
+        [
+            EvalWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                n_clusters=n_clusters,
+                filter_species=colombia_species_list,
+                epochs=epochs,
+                **params,
+            )
+            for tokenizer in ["tokenizer_pca"]
+            for n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [(train_root, "train")]
+            for params in [base_params]
+            for epochs in [10 * i for i in range(1, 11)]
+        ]
+        + [
+            EmbedWord2VecTask(
+                input_root=input_root,
+                soundscape_root=soundscape_root,
+                output_root=output_root,
+                output_prefix=output_prefix,
+                workers=gensim_workers,
+                tokenizer=tokenizer,
+                n_clusters=n_clusters,
+                epochs=100,
+                **params,
+            )
+            for tokenizer in ["tokenizer_pca"]
+            for n_clusters in [2**14 - 1]
+            for input_root, output_prefix in [
+                (train_root, "train_all"),
+                (soundscape_root, "soundscape_all"),
+            ]
+            for params in [base_params]
+        ],
+        workers=luigi_workers,
+        local_scheduler=True,
+    )
+
+
+@app.command()
+def evaluate_v2(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    base_params = {
+        "vector_size": 1024,
+        "window": 80,
+        "ns_exponent": 1.5,
+        "sample": 1e-5,
+    }
+    _evaluate(
+        base_params,
+        train_root=train_root,
+        soundscape_root=soundscape_root,
+        output_root=output_root,
+        gensim_workers=gensim_workers,
+        luigi_workers=luigi_workers,
+    )
+
+
+@app.command()
+def evaluate_v3(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    """Turns out that when we change the sample rate, we need to also change the ns exponent."""
+    base_params = {
+        "vector_size": 1024,
+        "window": 80,
+        "ns_exponent": 0,
+        "sample": 1e-5,
+    }
+    _evaluate(
+        base_params,
+        train_root=train_root,
+        soundscape_root=soundscape_root,
+        output_root=output_root,
+        gensim_workers=gensim_workers,
+        luigi_workers=luigi_workers,
+    )
+
+
+@app.command()
+def evaluate_v4(
+    train_root: str,
+    soundscape_root: str,
+    output_root: str,
+    gensim_workers: int = 8,
+    luigi_workers: int = 4,
+):
+    """Turns out that when we change the sample rate, we need to also change the ns exponent."""
+    base_params = {
+        "vector_size": 1024,
+        "window": 80,
+        "ns_exponent": -0.75,
+        "sample": 1e-4,
+    }
+    _evaluate(
+        base_params,
+        train_root=train_root,
+        soundscape_root=soundscape_root,
+        output_root=output_root,
+        gensim_workers=gensim_workers,
+        luigi_workers=luigi_workers,
     )
 
 

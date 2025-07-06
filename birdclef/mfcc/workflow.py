@@ -24,6 +24,14 @@ class OptionsMixin:
         default=200,
         description="Number of partitions to split the audio files into",
     )
+    n_mels = luigi.IntParameter(
+        default=128,
+        description="Number of mel bands to use in the mel spectrogram",
+    )
+    use_mfcc = luigi.BoolParameter(
+        default=True,
+        description="Whether to compute MFCCs from the audio files",
+    )
     limit = luigi.IntParameter(
         default=-1,
         description="Limit the number of audio files to process",
@@ -47,19 +55,26 @@ class ProcessPartition(luigi.Task, OptionsMixin):
         audio = Audio.from_file(path.as_posix(), sample_rate=32000)
         spec = MelSpectrogram.from_audio(
             audio,
-            n_mels=128,
+            n_mels=self.n_mels,
             fft_size=8192,
             window_samples=8000,
             overlap_fraction=0.5,
             # dont want to double log things
-            dB_scale=False,
+            dB_scale=False if self.use_mfcc else True,
         )
-        mfccs = librosa.feature.mfcc(
-            S=spec.spectrogram,
-            sr=spec.audio_sample_rate,
-            n_mfcc=n_mfcc,
-        )
+        if self.use_mfcc:
+            mfccs = librosa.feature.mfcc(
+                S=spec.spectrogram,
+                sr=spec.audio_sample_rate,
+                n_mfcc=n_mfcc,
+            )
+        else:
+            # TODO: fix this lie, we are not actually computing MFCCs here.
+            mfccs = spec.spectrogram
+
         # and now we return a pandas dataframe with the data
+        # NOTE: unfortunately all the data that comes out of this module
+        # is going to be in the mfcc column... even for the spectrogram.
         df = pd.DataFrame(
             {
                 "file": [path.as_posix()] * mfccs.shape[1],
@@ -122,6 +137,8 @@ class ProcessAudio(luigi.WrapperTask, OptionsMixin):
                 output_root=self.output_root,
                 num_partitions=self.num_partitions,
                 part=part,
+                use_mfcc=self.use_mfcc,
+                n_mels=self.n_mels,
             )
 
 
@@ -129,6 +146,8 @@ class ProcessAudio(luigi.WrapperTask, OptionsMixin):
 def process_audio(
     input_root: str,
     output_root: str,
+    use_mfcc: bool = True,
+    n_mels: int = 128,
     num_partitions: int = 100,
     limit: int = -1,
     num_workers: int = 1,
@@ -141,6 +160,8 @@ def process_audio(
                 output_root=output_root,
                 num_partitions=num_partitions,
                 limit=limit,
+                use_mfcc=use_mfcc,
+                n_mels=n_mels,
             )
         ],
         local_scheduler=True,

@@ -1,65 +1,87 @@
 """Module for running inference in the BirdCLEF Kaggle competition."""
 
 import json
+import multiprocessing as mp
 from pathlib import Path
 
 import bioacoustics_model_zoo as bmz
-import polars as pl
-import tqdm
-import typer
-from rich import print
-from opensoundscape import Audio
-from opensoundscape.spectrogram import MelSpectrogram
 import librosa
-from birdclef.config import model_config
-from birdclef.torch.model import LinearClassifier
-import torch
-import multiprocessing as mp
-from birdclef.kaggle.compile import load_tflite_interpreter, run_perch_tflite, run_birdnet_tflite
-from birdclef.kaggle.offline.birdset_efficientnet import BirdSetEfficientNetB1Offline
-from birdclef.kaggle.offline.birdset_convnext import BirdSetConvNeXTOffline
-from birdclef.kaggle.offline.rana_sierrae_cnn import RanaSierraeCNNOffline
-from birdclef.mel2vec.loaders import get_word_vectors, get_index
 import numpy as np
 import pandas as pd
+import polars as pl
+import torch
+import tqdm
+import typer
+from opensoundscape import Audio
+from opensoundscape.spectrogram import MelSpectrogram
+from rich import print
+
+from birdclef.config import model_config
+from birdclef.kaggle.compile import (
+    load_tflite_interpreter,
+    run_birdnet_tflite,
+    run_perch_tflite,
+)
+from birdclef.kaggle.offline.birdset_convnext import BirdSetConvNeXTOffline
+from birdclef.kaggle.offline.birdset_efficientnet import BirdSetEfficientNetB1Offline
+from birdclef.kaggle.offline.rana_sierrae_cnn import RanaSierraeCNNOffline
+from birdclef.mel2vec.loaders import get_index, get_pca, get_word_vectors, tokenize
+from birdclef.torch.model import LinearClassifier
 
 app = typer.Typer()
 
 
-def _process_mfcc(audio_path, index, word_vector, n_mfcc=20):
-    """Process a single audio file and return its mel spectrogram."""
+def _process_mel2vec(
+    audio_path,
+    index,
+    word_vector,
+    *,
+    n_mels=128,
+    use_mfcc=True,
+    n_mfcc=20,
+    pca_path=None,
+):
+    """Process a single audio file for mel2vec (v1 or v2)."""
     audio = Audio.from_file(audio_path.as_posix(), sample_rate=32000)
     spec = MelSpectrogram.from_audio(
         audio,
-        n_mels=128,
+        n_mels=n_mels,
         fft_size=8192,
         window_samples=8000,
         overlap_fraction=0.5,
-        # dont want to double log things
-        dB_scale=False,
+        dB_scale=False if use_mfcc else True,
     )
-    mfccs = librosa.feature.mfcc(
-        S=spec.spectrogram,
-        sr=spec.audio_sample_rate,
-        n_mfcc=n_mfcc,
-    )
-    # and now we return a pandas dataframe with the data
-    _, indices = index.search(mfccs.T, 1)
-    # indices is a (n_frames, 1) array
-    vectors = word_vector[indices.flatten()]
-
-    # and now we average the word vectors on 5 second intervals
-    # there must be a smarter way of doing this...
+    if use_mfcc:
+        features = librosa.feature.mfcc(
+            S=spec.spectrogram,
+            sr=spec.audio_sample_rate,
+            n_mfcc=n_mfcc,
+        )
+        features = features.T  # (n_frames, n_mfcc)
+        _, indices = index.search(features, 1)
+        tokens = indices.flatten().tolist()
+    else:
+        # Normalize each frame of the spectrogram
+        pca = get_pca(pca_path) if pca_path else None
+        tokens = tokenize(spec.spectrogram.T, index, pca=pca)
+    vectors = []
+    token_size = len(word_vector[0])
+    for token in tokens:
+        if token == -1:
+            # if the token is not found, return a zero vector
+            vectors.append(np.zeros(token_size, dtype=np.float32))
+        else:
+            # return the word vector for the token
+            vectors.append(word_vector[token])
+    vectors = word_vector[tokens]
     groups = {}
     for i, t in enumerate(spec.times):
         group = int(t // 5)
         if group not in groups:
             groups[group] = []
         groups[group].append(vectors[i])
-
     df = pd.DataFrame(
         data=[np.mean(groups[i], axis=0) for i in sorted(groups.keys())],
-        # index should include file and end_time
         index=pd.MultiIndex.from_frame(
             pd.DataFrame(
                 {
@@ -73,12 +95,28 @@ def _process_mfcc(audio_path, index, word_vector, n_mfcc=20):
 
 
 def get_embed_func(model_name, model_path, clip_step, tflite_threads):
-    if model_name == "mel2vec":
+    if model_name.startswith("mel2vec"):
         index = get_index(model_path / "centroids.npy")
         word_vector = get_word_vectors(model_path / "word2vec.wordvectors")
+        if model_name in ["mel2vec", "mel2vec_v1"]:
 
-        def embed_func(audio_file):
-            return _process_mfcc(audio_file, index, word_vector, n_mfcc=20)
+            def embed_func(audio_file):
+                return _process_mel2vec(
+                    audio_file, index, word_vector, n_mels=128, use_mfcc=True, n_mfcc=20
+                )
+        else:
+
+            def embed_func(audio_file):
+                return _process_mel2vec(
+                    audio_file,
+                    index,
+                    word_vector,
+                    n_mels=768,
+                    use_mfcc=False,
+                    pca_path=model_path / "pca.bin",
+                )
+        # else:
+        #     raise ValueError(f"Unknown mel2vec variant: {model_name}")
     else:
         if model_name == "BirdSetEfficientNetB1":
             embedder = BirdSetEfficientNetB1Offline(model_path)
@@ -88,7 +126,7 @@ def get_embed_func(model_name, model_path, clip_step, tflite_threads):
             embedder = RanaSierraeCNNOffline(model_path)
         else:
             embedder = bmz.list_models()[model_name]()
-        
+
         if model_name in ["BirdNET", "Perch"]:
             # look for tflite file next to the label_to_idx...
             tflite_path = list(model_path.glob("*.tflite"))[0]
@@ -151,7 +189,12 @@ def process_part(
         input_dim=(
             model_config[model_name]["embed_size"]
             if model_name in model_config
-            else {"mel2vec": 384}[model_name]
+            else {
+                "mel2vec": 384,
+                "mel2vec-v2": 1024,
+                "mel2vec-v3": 1024,
+                "mel2vec-v4": 1024,
+            }[model_name]
         ),
         num_classes=len(label_to_index),
     )
