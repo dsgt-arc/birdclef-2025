@@ -17,7 +17,8 @@ set -xe
 project_dir=/storage/coda1/p-dsgt_clef2025/0/shared/birdclef
 scratch_dir=$(realpath ~/scratch/birdclef)
 
+version=${1:-"mel2vec-v2"}
 python -m birdclef.mel2vec.student_teacher train \
     "student-teacher" \
-    --root $scratch_dir/2025v2/mel2vec-v2 \
-    --data-path $scratch_dir/2025v2/mel2vec-v2/soundscape-token-perch
+    --root $scratch_dir/2025v2/$version \
+    --data-path $scratch_dir/2025v2/$version/soundscape-token-perch
