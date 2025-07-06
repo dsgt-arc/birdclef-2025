@@ -4,7 +4,7 @@
 #SBATCH --time=04:00:00 --output=logs/Report-mel2vec-%j.log
 #SBATCH --mail-type=BEGIN,END,FAIL --mail-user=acmiyaguchi@gatech.edu
 set -eu
-
+shopt -s globstar
 hostname
 source ~/scratch/birdclef/.venv/bin/activate
 echo $PWD
@@ -18,8 +18,16 @@ model_dir=$project_dir/models/2025/v2-anthony/mel2vec
 cp $scratch_dir/2025/mel2vec-v1/word2vec/tokenizer=tokenizer/tokenizer_n_clusters=16383/vector_size=384/window=80/ns_exponent=1.5/sample=1e-05/epochs=100/word2vec.wordvectors $model_dir/
 cp $scratch_dir/2025/mel2vec-v1/tokenizer/n_clusters=16383/centroids.npy $model_dir/
 
+for version in v2 v3 v4; do
+    model="mel2vec-$version"
+    model_dir=$project_dir/models/2025/v2-anthony/$model
+    cp $scratch_dir/2025v2/$model/word2vec/**/epochs=100/word2vec.* $model_dir/
+    cp $scratch_dir/2025v2/$model/tokenizer_pca/n_clusters=16383/* $model_dir/
+done
+
+model=${1:-"mel2vec-v2"}
 python -m birdclef.kaggle.main \
     $scratch_dir/test_soundscape \
-    $scratch_dir/tmp/mel2vec \
-    $project_dir/models/2025/v2-anthony/mel2vec \
-    mel2vec
+    $scratch_dir/tmp/$model \
+    $project_dir/models/2025/v2-anthony/$model \
+    $model

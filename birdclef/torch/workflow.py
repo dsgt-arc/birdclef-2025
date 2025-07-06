@@ -18,7 +18,7 @@ app = typer.Typer()
 
 
 def load_mel2vec_data(input_path: str, model_name) -> pd.DataFrame:
-    if model_name == "mfcc":
+    if model_name in ["mfcc", "melspec"]:
         col = "mfcc_stats"
     else:
         col = "word_vector"
@@ -43,7 +43,7 @@ def load_mel2vec_data(input_path: str, model_name) -> pd.DataFrame:
 
 
 def load_preprocess_data(input_path: str, model_name: str = "") -> pd.DataFrame:
-    if model_name in ["mel2vec", "mfcc"]:
+    if model_name in ["mel2vec", "mfcc", "melspec"] or model_name.startswith("mel2vec"):
         return load_mel2vec_data(input_path, model_name)
 
     df = pd.read_parquet(input_path)

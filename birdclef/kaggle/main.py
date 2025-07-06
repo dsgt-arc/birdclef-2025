@@ -1,33 +1,45 @@
 """Module for running inference in the BirdCLEF Kaggle competition."""
 
 import json
+import multiprocessing as mp
 from pathlib import Path
 
 import bioacoustics_model_zoo as bmz
-import polars as pl
-import tqdm
-import typer
-from rich import print
-from opensoundscape import Audio
-from opensoundscape.spectrogram import MelSpectrogram
 import librosa
-from birdclef.config import model_config
-from birdclef.torch.model import LinearClassifier
-import torch
-import multiprocessing as mp
-from birdclef.kaggle.compile import load_tflite_interpreter, run_perch_tflite, run_birdnet_tflite
-from birdclef.kaggle.offline.birdset_efficientnet import BirdSetEfficientNetB1Offline
-from birdclef.kaggle.offline.birdset_convnext import BirdSetConvNeXTOffline
-from birdclef.kaggle.offline.rana_sierrae_cnn import RanaSierraeCNNOffline
-from birdclef.mel2vec.loaders import get_word_vectors, get_index
 import numpy as np
 import pandas as pd
+import polars as pl
+import torch
+import tqdm
+import typer
+from opensoundscape import Audio
+from opensoundscape.spectrogram import MelSpectrogram
+from rich import print
+
+from birdclef.config import model_config
+from birdclef.kaggle.compile import (
+    load_tflite_interpreter,
+    run_birdnet_tflite,
+    run_perch_tflite,
+)
+from birdclef.kaggle.offline.birdset_convnext import BirdSetConvNeXTOffline
+from birdclef.kaggle.offline.birdset_efficientnet import BirdSetEfficientNetB1Offline
+from birdclef.kaggle.offline.rana_sierrae_cnn import RanaSierraeCNNOffline
+from birdclef.mel2vec.loaders import get_index, get_pca, get_word_vectors, tokenize
+from birdclef.torch.model import LinearClassifier
 
 app = typer.Typer()
 
 
 def _process_mel2vec(
-    audio_path, index, word_vector, *, n_mels=128, use_mfcc=True, n_mfcc=20
+    audio_path,
+    index,
+    word_vector,
+    *,
+    n_mels=128,
+    use_mfcc=True,
+    n_mfcc=20,
+    pca_path=None,
 ):
     """Process a single audio file for mel2vec (v1 or v2)."""
     audio = Audio.from_file(audio_path.as_posix(), sample_rate=32000)
@@ -46,13 +58,12 @@ def _process_mel2vec(
             n_mfcc=n_mfcc,
         )
         features = features.T  # (n_frames, n_mfcc)
+        _, indices = index.search(features, 1)
+        tokens = indices.flatten().tolist()
     else:
         # Normalize each frame of the spectrogram
-        S = spec.spectrogram.astype(np.float32)
-        S = S / (np.linalg.norm(S, axis=0, keepdims=True) + 1e-8)
-        features = S.T  # (n_frames, n_mels)
-    _, indices = index.search(features, 1)
-    tokens = [idx[0] for idx in indices]
+        pca = get_pca(pca_path) if pca_path else None
+        tokens = tokenize(spec.spectrogram.T, index, pca=pca)
     vectors = []
     token_size = len(word_vector[0])
     for token in tokens:
@@ -62,7 +73,7 @@ def _process_mel2vec(
         else:
             # return the word vector for the token
             vectors.append(word_vector[token])
-    vectors = word_vector[indices.flatten()]
+    vectors = word_vector[tokens]
     groups = {}
     for i, t in enumerate(spec.times):
         group = int(t // 5)
@@ -93,14 +104,19 @@ def get_embed_func(model_name, model_path, clip_step, tflite_threads):
                 return _process_mel2vec(
                     audio_file, index, word_vector, n_mels=128, use_mfcc=True, n_mfcc=20
                 )
-        elif model_name == "mel2vec_v2":
+        else:
 
             def embed_func(audio_file):
                 return _process_mel2vec(
-                    audio_file, index, word_vector, n_mels=768, use_mfcc=False
+                    audio_file,
+                    index,
+                    word_vector,
+                    n_mels=768,
+                    use_mfcc=False,
+                    pca_path=model_path / "pca.bin",
                 )
-        else:
-            raise ValueError(f"Unknown mel2vec variant: {model_name}")
+        # else:
+        #     raise ValueError(f"Unknown mel2vec variant: {model_name}")
     else:
         if model_name == "BirdSetEfficientNetB1":
             embedder = BirdSetEfficientNetB1Offline(model_path)
@@ -110,7 +126,7 @@ def get_embed_func(model_name, model_path, clip_step, tflite_threads):
             embedder = RanaSierraeCNNOffline(model_path)
         else:
             embedder = bmz.list_models()[model_name]()
-        
+
         if model_name in ["BirdNET", "Perch"]:
             # look for tflite file next to the label_to_idx...
             tflite_path = list(model_path.glob("*.tflite"))[0]
@@ -173,7 +189,12 @@ def process_part(
         input_dim=(
             model_config[model_name]["embed_size"]
             if model_name in model_config
-            else {"mel2vec": 384}[model_name]
+            else {
+                "mel2vec": 384,
+                "mel2vec-v2": 1024,
+                "mel2vec-v3": 1024,
+                "mel2vec-v4": 1024,
+            }[model_name]
         ),
         num_classes=len(label_to_index),
     )
